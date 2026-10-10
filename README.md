@@ -1,10 +1,16 @@
-# MathDemon
+<p align="center">
+  <img src="logos/logo-and-text.png" alt="MathDemon" width="360">
+</p>
 
-**A free, open-source game for training mental arithmetic, working memory and mathematical logic.**
+<h1 align="center">MathDemon</h1>
+
+<p align="center"><b>A free, open-source game for training mental arithmetic, working memory and mathematical logic.</b></p>
+
+<p align="center"><b>▶ Play now: <a href="https://danielmartinscabanas.github.io/mathdemon/">danielmartinscabanas.github.io/mathdemon</a></b></p>
 
 MathDemon throws a never-ending stream of math problems at you, each one a little harder than the last. You solve them in your head, type the answer, and climb a ladder of 36 ranks, from *Novice* to *The Absolute*. There is no level cap: problems keep growing in complexity for as long as you can keep up.
 
-It is one single `index.html` file. Open it in a browser and play.
+It is one single `index.html` file. [Play it online](https://danielmartinscabanas.github.io/mathdemon/), or download `index.html` and open it in a browser.
 
 ---
 
@@ -24,10 +30,11 @@ Difficulty is not just "bigger numbers". Each problem is built from a complexity
 
 - **Skill and ranks**: every right answer raises your skill rating and every wrong answer lowers it, so your rank reflects the level you can really handle. There are 36 ranks in 6 tiers, and the last one is meant to be almost impossible to reach.
 - **Every miss counts**: each wrong answer is logged in your history (with what you typed, never the solution) and costs skill.
-- **Sacrifice**: give up a problem to see its answer and move on. It counts as a full defeat.
+- **Sacrifice**: give up a problem to see its answer and move on. It counts as a full defeat, and asks for confirmation so it can't be triggered by accident.
 - **Streaks**: keep a streak going and the Streak box catches fire. Break it and the fire goes out.
 - **Languages**: English and Brazilian Portuguese.
 - **Music**: ambient background music in a loop, with an on/off button.
+- **On-screen keypad**: digits, minus, comma, delete and submit, so you never fight the phone keyboard. A physical keyboard works too.
 - **Mobile friendly**: responsive layout, and an install button for adding it to your phone's home screen.
 
 ## Privacy: 100% local, no data collection
@@ -97,6 +104,8 @@ No machine learning and no pre-written problem lists. Problems are generated pro
 Add `?dev` to the URL (for example `index.html?dev`) to open the developer tools: a debug panel (AST, complexity score, intermediate values, seed, tunable parameters) and an in-browser test suite that generates over a thousand problems and validates them automatically.
 
 ## Deploying to GitHub Pages
+
+The live version is hosted on GitHub Pages at **https://danielmartinscabanas.github.io/mathdemon/**.
 
 Since the game is a single static file, publishing it is easy: put `index.html` in the root of the repository, enable **GitHub Pages** in the repository settings, and you are done. No build step.
 
