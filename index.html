@@ -181,7 +181,15 @@
   .bar > #cxBar { position: absolute; left: 0; top: 0; bottom: 0; background: var(--text); }
   .bar > #cxMark { position: absolute; top: 0; bottom: 0; width: 2px; background: var(--red); }
 
-  .answer-row { display: flex; gap: 10px; }
+  .answer-row { display: flex; gap: 10px; max-width: 460px; margin: 0 auto; }
+  /* on-screen keypad (the answer field no longer opens the phone keyboard) */
+  .keypad { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; max-width: 460px; margin: 10px auto 0; touch-action: manipulation; user-select: none; -webkit-user-select: none; }
+  .keypad .kp { height: 54px; padding: 0; font-size: 27px; font-variant-caps: normal; letter-spacing: 0; font-weight: 600; font-variant-numeric: lining-nums; -webkit-tap-highlight-color: transparent; }
+  .keypad .kp-fn { color: var(--muted); }
+  .keypad .kp-fn svg { display: block; margin: 0 auto; }
+  .keypad .kp-enter { grid-column: span 2; font-size: 20px; font-variant-caps: all-small-caps; letter-spacing: .14em; }
+  .keypad .kp:disabled { opacity: .3; }
+  .keypad .kp:active:not(:disabled) { transform: scale(.95); }
   input[type=text], input[type=number], select {
     background-color: var(--sunken); color: var(--text); border: 1px solid var(--line); border-radius: var(--radius);
     padding: 10px 12px; font: inherit; min-width: 0; font-variant-numeric: lining-nums;
@@ -337,6 +345,7 @@
   #nextBtn:not([hidden]) { animation: rise .4s var(--ease-out) both; }
   button.sacrifice { background-color: transparent; background-image: none; border-color: rgba(177, 27, 36, .55); color: var(--red); box-shadow: none; }
   button.sacrifice:hover:not(:disabled) { background-color: var(--red-solid); background-image: var(--grain-brushed); border-color: var(--red-solid); color: var(--text); box-shadow: var(--shadow-2); }
+  button.sacrifice.armed { background-color: var(--red-solid); background-image: var(--grain-brushed); border-color: var(--red-solid); color: var(--text); }
   button.sacrifice .cost { font-variant-caps: normal; letter-spacing: 0; font-weight: 500; font-size: 16px; opacity: .8; }
   .solution:not([hidden]) { animation: rise .4s var(--ease-out) both; }
   .answer-reveal { text-align: center; font-size: 21px; font-variant-numeric: lining-nums; }
@@ -363,6 +372,8 @@
     .math-display math { font-size: 1.7rem; }
     .answer-row { flex-wrap: wrap; }
     #answerIn { flex: 1 1 100%; }
+    .keypad { gap: 7px; }
+    .keypad .kp { height: 52px; }
     .rank-card { gap: 12px; padding: 0 2px; }
     .rank-badge { width: 60px; height: 60px; }
     .rank-name { font-size: 21px; }
@@ -434,15 +445,16 @@
       <div class="bar"><div id="cxBar"></div><div id="cxMark"></div></div>
     </div>
     <div class="answer-row">
-      <input id="answerIn" type="text" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" enterkeyhint="send" placeholder="Your answer" data-i18n-aria="answerLabel" aria-label="Answer">
-      <button id="submitBtn" class="primary" data-i18n="submit">Submit</button>
+      <input id="answerIn" type="text" inputmode="none" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" enterkeyhint="send" placeholder="Your answer" data-i18n-aria="answerLabel" aria-label="Answer">
+      <button id="submitBtn" class="primary" data-i18n="submit" hidden>Submit</button>
     </div>
+    <div class="keypad" id="keypad" role="group" data-i18n-aria="keypad" aria-label="Keypad"><button type="button" class="kp" data-k="1">1</button><button type="button" class="kp" data-k="2">2</button><button type="button" class="kp" data-k="3">3</button><button type="button" class="kp kp-fn" data-k="back" data-i18n-aria="keyBack" aria-label="Delete"><svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 6h11v12H9l-5-6z"/><path d="M12.5 9.5l5 5M17.5 9.5l-5 5"/></svg></button><button type="button" class="kp" data-k="4">4</button><button type="button" class="kp" data-k="5">5</button><button type="button" class="kp" data-k="6">6</button><button type="button" class="kp kp-fn" data-k="-" data-i18n-aria="keyMinus" aria-label="Minus">−</button><button type="button" class="kp" data-k="7">7</button><button type="button" class="kp" data-k="8">8</button><button type="button" class="kp" data-k="9">9</button><button type="button" class="kp kp-fn" data-k="," id="kpComma" data-i18n-aria="keyComma" aria-label="Comma">,</button><button type="button" class="kp kp-fn" data-k="clear" data-i18n-aria="keyClear" aria-label="Clear">C</button><button type="button" class="kp" data-k="0">0</button><button type="button" class="kp kp-enter primary" data-k="enter" id="kpEnter">Submit</button></div>
     <div class="hint" id="answerHint"></div>
     <div class="feedback" id="feedback" role="status"></div>
     <div class="actions">
       <button id="newBtn" class="ghost dev-only" data-i18n="skip">Skip</button>
       <button id="revealBtn" class="ghost dev-only" data-i18n="reveal">Reveal solution</button>
-      <button id="sacrificeBtn" class="sacrifice" data-i18n-title="sacrificeTitle"><span data-i18n="sacrifice">Sacrifice</span> <span class="cost" id="sacrificeCost"></span></button>
+      <button id="sacrificeBtn" class="sacrifice" data-i18n-title="sacrificeTitle"><span id="sacrificeLabel" data-i18n="sacrifice">Sacrifice</span> <span class="cost" id="sacrificeCost"></span></button>
       <button id="nextBtn" class="primary" hidden>Next level →</button>
     </div>
     <div class="solution" id="solution" hidden></div>
@@ -2078,6 +2090,7 @@ const I18N = {
     rootsWrong: n => (n === 1 ? '1 of your values is not a solution.' : `${n} of your values are not solutions.`),
     rootsHave: (hits, total) => `You have ${hits} of ${total} solutions.`,
     revealed: 'Solution revealed. No points for this problem.',
+    sacrificeConfirm: 'Confirm sacrifice?', keypad: 'Keypad', keyBack: 'Delete', keyMinus: 'Minus', keyComma: 'Comma', keyClear: 'Clear',
     sacrifice: 'Sacrifice', sacrificeTitle: 'Give up this problem: lose skill, see the answer and move on',
     sacrificed: n => `Sacrificed. −${n} skill. Press Enter for the next problem.`,
     answerWas: 'The answer was', sacrificedWord: 'defeat (sacrifice)',
@@ -2121,6 +2134,7 @@ const I18N = {
     rootsWrong: n => (n === 1 ? '1 dos seus valores não é solução.' : `${n} dos seus valores não são soluções.`),
     rootsHave: (hits, total) => `Você tem ${hits} de ${total} soluções.`,
     revealed: 'Solução revelada. Nenhum ponto neste problema.',
+    sacrificeConfirm: 'Confirmar sacrifício?', keypad: 'Teclado', keyBack: 'Apagar', keyMinus: 'Menos', keyComma: 'Vírgula', keyClear: 'Limpar',
     sacrifice: 'Sacrifício', sacrificeTitle: 'Desistir deste problema: perde habilidade, vê a resposta e segue para o próximo',
     sacrificed: n => `Sacrificado. −${n} de habilidade. Pressione Enter para o próximo problema.`,
     answerWas: 'A resposta era', sacrificedWord: 'derrota (sacrifício)',
@@ -2227,6 +2241,7 @@ class GameController {
     Music.updateButton();
     Install.updateButton();
     if (this.nextKey) $('nextBtn').textContent = t(this.nextKey);
+    this.disarmSacrifice(); this.updateKeypad();
     if (this.answerShown) this.showAnswer();
     this.showFeedback();
     $('ladder').innerHTML = '';
@@ -2341,8 +2356,49 @@ class GameController {
 
   updateSacrifice() {
     const s = this.state, open = !s.solved && !s.revealed;
+    this.disarmSacrifice();
     $('sacrificeBtn').hidden = !open;
     if (open) { const c = this.sacrificeCost(); $('sacrificeCost').textContent = c > 0 ? `−${c}` : ''; }
+  }
+
+  /** First press arms the button ("Confirm sacrifice?"); only a second press within 4 s sacrifices. */
+  confirmSacrifice() {
+    const btn = $('sacrificeBtn');
+    if (btn.classList.contains('armed')) { this.disarmSacrifice(); this.sacrifice(); return; }
+    btn.classList.add('armed');
+    $('sacrificeLabel').textContent = t('sacrificeConfirm');
+    clearTimeout(this.sacrificeTimer);
+    this.sacrificeTimer = setTimeout(() => this.disarmSacrifice(), 4000);
+  }
+
+  disarmSacrifice() {
+    clearTimeout(this.sacrificeTimer);
+    const btn = $('sacrificeBtn');
+    if (!btn.classList.contains('armed')) return;
+    btn.classList.remove('armed');
+    $('sacrificeLabel').textContent = t('sacrifice');
+  }
+
+  /** On-screen keypad: types at the caret (or appends), without opening the phone keyboard. */
+  pressKey(k) {
+    if (k === 'enter') { this.submit(); return; }
+    const input = $('answerIn');
+    if (input.disabled || this.state.solved || this.state.revealed) return;
+    const v = input.value, focused = document.activeElement === input;
+    let a = focused && input.selectionStart != null ? input.selectionStart : v.length;
+    let b = focused && input.selectionEnd != null ? input.selectionEnd : v.length;
+    if (k === 'clear') { input.value = ''; a = 0; }
+    else if (k === 'back') { if (a === b && a > 0) a--; input.setRangeText('', a, b, 'end'); }
+    else input.setRangeText(k === ',' ? ', ' : k, a, b, 'end');
+    input.focus({ preventScroll: true });
+  }
+
+  /** Keys reflect the problem: comma only for several solutions; typing keys rest once it is answered. */
+  updateKeypad() {
+    const s = this.state, done = s.solved || s.revealed;
+    $('keypad').querySelectorAll('.kp').forEach(b => { if (b.dataset.k !== 'enter') b.disabled = done; });
+    $('kpComma').disabled = done || this.problem.answer.kind !== 'roots';
+    $('kpEnter').textContent = t(this.nextKey || 'submit');
   }
 
   /** Give up the problem: counts as a full defeat, shows the answer, and the next problem is at the same level. */
@@ -2359,6 +2415,7 @@ class GameController {
     $('submitBtn').disabled = true; $('revealBtn').disabled = true;
     this.nextKey = 'nextProblem'; $('nextBtn').textContent = t('nextProblem'); $('nextBtn').hidden = false;
     this.updateSacrifice();
+    this.updateKeypad();
     this.persist();
   }
 
@@ -2514,6 +2571,7 @@ class GameController {
     $('solution').hidden = true; this.answerShown = false;
     $('nextBtn').hidden = true; this.nextKey = null;
     this.updateSacrifice();
+    this.updateKeypad();
     if (DEV_MODE) { $('dbgLevelIn').value = s.level; $('dbgSeedIn').value = s.seed; this.debug.render(p); }
     input.focus({ preventScroll: true });
   }
@@ -2578,6 +2636,7 @@ class GameController {
       $('submitBtn').disabled = true; $('revealBtn').disabled = true;
       this.nextKey = 'nextLevel'; $('nextBtn').textContent = t('nextLevel'); $('nextBtn').hidden = false;
       this.updateSacrifice();
+      this.updateKeypad();
       this.hud();
       this.fx('good');
       this.timer = setTimeout(() => this.advance(), 1600);
@@ -2630,6 +2689,7 @@ class GameController {
     $('submitBtn').disabled = true; $('revealBtn').disabled = true;
     this.nextKey = 'nextProblem'; $('nextBtn').textContent = t('nextProblem'); $('nextBtn').hidden = false;
     this.updateSacrifice();
+    this.updateKeypad();
     this.persist();
   }
 
@@ -2653,7 +2713,10 @@ class GameController {
     $('answerIn').addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); this.submit(); } });
     $('newBtn').onclick = () => this.skip();
     $('revealBtn').onclick = () => this.reveal();
-    $('sacrificeBtn').onclick = () => this.sacrifice();
+    $('sacrificeBtn').onclick = () => this.confirmSacrifice();
+    const kp = $('keypad');
+    kp.addEventListener('pointerdown', e => { if (e.target.closest('.kp')) e.preventDefault(); });   // keep focus in the field, no phone keyboard
+    kp.addEventListener('click', e => { const b = e.target.closest('.kp'); if (b && !b.disabled) this.pressKey(b.dataset.k); });
     $('nextBtn').onclick = () => (this.state.solved ? this.advance() : this.skip());
     window.addEventListener('resize', () => this.fitMath());
     $('langSel').onchange = e => this.setLanguage(e.target.value);
