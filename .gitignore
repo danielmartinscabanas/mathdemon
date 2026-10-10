@@ -1,0 +1,22 @@
+# Claude Code (settings, memory, local instructions and agent workflow files)
+.claude/
+.claude-*/
+CLAUDE.md
+CLAUDE.local.md
+.mcp.json
+tasks/
+
+# Python
+__pycache__/
+*.pyc
+
+# Operating system
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Editors
+.vscode/
+.idea/
+*.swp
+*~
