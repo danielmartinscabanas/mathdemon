@@ -217,7 +217,7 @@
   .keypad .kp-fn { color: var(--muted); }
   .keypad .kp-fn svg { display: block; margin: 0 auto; }
   .keypad .kp[hidden] { display: none; }
-  .keypad.has-i .kp-enter { grid-column: span 1; }   /* complex problems: the extra "i" key takes one of the two columns */
+  .keypad.has-i .kp-enter { grid-column: span 4; }   /* complex problems: "i" and "+" fill the bottom row, Submit gets its own */
   .keypad .kp-enter { grid-column: span 2; white-space: nowrap; padding-left: 4px; padding-right: 4px; font-size: 20px; font-variant-caps: all-small-caps; letter-spacing: .14em; }
   .keypad .kp:disabled { opacity: .3; }
   input[type=text], input[type=number], select {
@@ -513,7 +513,7 @@
       <input id="answerIn" type="text" inputmode="none" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" enterkeyhint="send" placeholder="Your answer" data-i18n-aria="answerLabel" aria-label="Answer">
       <button id="submitBtn" class="primary" data-i18n="submit" hidden>Submit</button>
     </div>
-    <div class="keypad" id="keypad" role="group" data-i18n-aria="keypad" aria-label="Keypad"><button type="button" class="kp" data-k="1">1</button><button type="button" class="kp" data-k="2">2</button><button type="button" class="kp" data-k="3">3</button><button type="button" class="kp kp-fn" data-k="back" data-i18n-aria="keyBack" aria-label="Delete"><svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 6h11v12H9l-5-6z"/><path d="M12.5 9.5l5 5M17.5 9.5l-5 5"/></svg></button><button type="button" class="kp" data-k="4">4</button><button type="button" class="kp" data-k="5">5</button><button type="button" class="kp" data-k="6">6</button><button type="button" class="kp kp-fn" data-k="-" data-i18n-aria="keyMinus" aria-label="Minus">−</button><button type="button" class="kp" data-k="7">7</button><button type="button" class="kp" data-k="8">8</button><button type="button" class="kp" data-k="9">9</button><button type="button" class="kp kp-fn" data-k="," id="kpComma" data-i18n-aria="keyComma" aria-label="Comma">,</button><button type="button" class="kp kp-fn" data-k="clear" data-i18n-aria="keyClear" aria-label="Clear">C</button><button type="button" class="kp" data-k="0">0</button><button type="button" class="kp" data-k="i" id="kpI" hidden>i</button><button type="button" class="kp kp-enter primary" data-k="enter" id="kpEnter">Submit</button></div>
+    <div class="keypad" id="keypad" role="group" data-i18n-aria="keypad" aria-label="Keypad"><button type="button" class="kp" data-k="1">1</button><button type="button" class="kp" data-k="2">2</button><button type="button" class="kp" data-k="3">3</button><button type="button" class="kp kp-fn" data-k="back" data-i18n-aria="keyBack" aria-label="Delete"><svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 6h11v12H9l-5-6z"/><path d="M12.5 9.5l5 5M17.5 9.5l-5 5"/></svg></button><button type="button" class="kp" data-k="4">4</button><button type="button" class="kp" data-k="5">5</button><button type="button" class="kp" data-k="6">6</button><button type="button" class="kp kp-fn" data-k="-" data-i18n-aria="keyMinus" aria-label="Minus">−</button><button type="button" class="kp" data-k="7">7</button><button type="button" class="kp" data-k="8">8</button><button type="button" class="kp" data-k="9">9</button><button type="button" class="kp kp-fn" data-k="," id="kpComma" data-i18n-aria="keyComma" aria-label="Comma">,</button><button type="button" class="kp kp-fn" data-k="clear" data-i18n-aria="keyClear" aria-label="Clear">C</button><button type="button" class="kp" data-k="0">0</button><button type="button" class="kp" data-k="i" id="kpI" hidden>i</button><button type="button" class="kp" data-k="+" id="kpPlus" hidden>+</button><button type="button" class="kp kp-enter primary" data-k="enter" id="kpEnter">Submit</button></div>
     <div class="hint" id="answerHint"></div>
     <div class="feedback" id="feedback" role="status"></div>
     <div class="actions">
@@ -3770,9 +3770,9 @@ class GameController {
   updateKeypad() {
     const s = this.state, done = s.solved || s.revealed;
     $('keypad').querySelectorAll('.kp').forEach(b => { if (b.dataset.k !== 'enter') b.disabled = done; });
-    $('kpComma').disabled = done || this.problem.answer.kind === 'integer';
-    const cx = !!this.problem.answer.complex;   // complex answers are typed as a + bi (or "re, im"): an "i" key joins the bottom row
-    $('kpI').hidden = !cx; $('kpI').disabled = done; $('keypad').classList.toggle('has-i', cx);
+    $('kpComma').disabled = done;   // always on: a comma lets the player keep a partial answer in the box
+    const cx = !!this.problem.answer.complex;   // complex answers are typed as a + bi (or "re, im"): "i" and "+" keys join the bottom row
+    $('kpI').hidden = $('kpPlus').hidden = !cx; $('kpI').disabled = $('kpPlus').disabled = done; $('keypad').classList.toggle('has-i', cx);
     $('kpEnter').textContent = t(this.nextKey || 'submit');
     this.fitEnter();
   }
