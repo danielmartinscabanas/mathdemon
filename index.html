@@ -4225,14 +4225,13 @@ class TestPanel {
  * tap, click or key press.
  */
 const Music = {
-  KEY: 'mathdemon.music', VOLUME: 0.25, EVENTS: ['pointerdown', 'pointerup', 'mousedown', 'touchend', 'click', 'keydown'],
+  KEY: 'mathdemon.music.pref', VOLUME: 0.25, EVENTS: ['pointerdown', 'pointerup', 'mousedown', 'touchend', 'click', 'keydown'],
   el: null, wanted: true, waiting: false,
   init() {
     const uri = (typeof ASSETS !== 'undefined' && ASSETS.music) || '';
     const btn = document.getElementById('musicBtn');
     if (!uri) { if (btn) btn.hidden = true; return; }
-    try { localStorage.removeItem(this.KEY); } catch (e) { /* storage blocked */ }   // old versions saved the choice permanently
-    try { this.wanted = sessionStorage.getItem(this.KEY) !== 'off'; } catch (e) { /* storage blocked */ }
+    try { this.wanted = localStorage.getItem(this.KEY) !== 'off'; } catch (e) { /* storage blocked */ }   // the choice survives refreshes and later visits
     // A Blob URL streams and loops better than a multi-megabyte data: URL.
     const bin = atob(uri.slice(uri.indexOf(',') + 1)), bytes = new Uint8Array(bin.length);
     for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
@@ -4256,7 +4255,7 @@ const Music = {
   },
   toggle() {
     this.wanted = !this.wanted;
-    try { sessionStorage.setItem(this.KEY, this.wanted ? 'on' : 'off'); } catch (e) { /* not persisted */ }
+    try { localStorage.setItem(this.KEY, this.wanted ? 'on' : 'off'); } catch (e) { /* not persisted */ }
     if (this.wanted) this.play(); else this.el.pause();
     this.updateButton();
   },
