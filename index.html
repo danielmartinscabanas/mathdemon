@@ -133,6 +133,24 @@
     to   { background-position: 0 -160px, 0 -210px, 0 100%; }
   }
 
+  /* Correct answer: flames lick all four screen edges for one second (0.5 s fade in, 0.5 s fade out).
+     Same fire as the streak box; the left, right and top strips are the bottom strip rotated so every flame points inward. */
+  #fireFx { --fh: clamp(40px, 6.5vmin, 76px); position: fixed; inset: 0; z-index: 60; pointer-events: none; overflow: hidden; visibility: hidden; opacity: 0; }
+  #fireFx.on { visibility: visible; animation: fireBurst 1s ease-in-out forwards; }
+  @keyframes fireBurst { 0% { opacity: 0; } 50% { opacity: .55; } 100% { opacity: 0; } }
+  #fireFx .ff {
+    position: absolute; height: var(--fh); transform-origin: 0 0;
+    background-image: var(--fire-a), var(--fire-b), linear-gradient(0deg, #fff 0%, #d4d4d4 28%, #7c7c7c 58%, #2c2c2c 100%);
+    background-size: 120px 160px, 140px 210px, 100% 105%; background-position: 0 0, 0 0, 0 100%;   /* steeper heat: shorter, sparser tongues */
+    background-blend-mode: overlay, multiply; background-repeat: repeat, repeat, no-repeat;
+    filter: url(#flame); animation: streakFire .6s linear infinite;
+  }
+  #fireFx .ff-b { left: 0; bottom: 0; width: 100%; }
+  #fireFx .ff-t { left: 100%; top: var(--fh); width: 100%; transform: rotate(180deg); }
+  #fireFx .ff-l { left: var(--fh); top: 0; width: 100vh; width: 100dvh; transform: rotate(90deg); }
+  #fireFx .ff-r { left: calc(100% - var(--fh)); top: 100%; width: 100vh; width: 100dvh; transform: rotate(-90deg); }
+  @media (prefers-reduced-motion: reduce) { #fireFx { display: none; } }
+
   /* ---- Rank card and skill bar ---- */
   .rank-card { display: flex; align-items: center; gap: 16px; background-color: var(--surface); border: 1px solid var(--line); border-radius: 14px; padding: 12px 18px; margin-bottom: 14px; }
   .rank-badge { width: 78px; height: 78px; flex: none; display: flex; align-items: center; justify-content: center; }
@@ -268,6 +286,9 @@
   details.card > summary::before { content: "+"; display: inline-block; width: 14px; margin-right: 6px; text-align: center; font-weight: 600; color: var(--red); font-variant-caps: normal; }
   details.card[open] > summary::before { content: "−"; }
   details.card[open] > summary { margin-bottom: 12px; }
+  .tutorial p { margin: 0 0 12px; line-height: 1.55; font-size: 17px; }
+  .tutorial p:last-child { margin-bottom: 0; }
+  .tutorial-tip { font-style: italic; color: var(--muted); }
   .summary-note { font-variant-caps: normal; letter-spacing: 0; font-weight: 400; font-style: italic; color: var(--muted); font-size: 17px; margin-left: 8px; font-variant-numeric: lining-nums; }
   h2 { font-size: 15px; margin: 0 0 12px; color: var(--muted); font-weight: 600; font-variant-caps: all-small-caps; letter-spacing: .16em; }
   h3 { font-size: 16px; margin: 18px 0 8px; color: var(--muted); font-weight: 600; font-variant-caps: all-small-caps; letter-spacing: .12em; }
@@ -455,6 +476,7 @@
 </style>
 </head>
 <body>
+<div id="fireFx" aria-hidden="true"><i class="ff ff-b"></i><i class="ff ff-t"></i><i class="ff ff-l"></i><i class="ff ff-r"></i></div>
 <svg width="0" height="0" style="position:absolute" aria-hidden="true" focusable="false">
   <filter id="flame" x="-5%" y="-5%" width="110%" height="110%" color-interpolation-filters="sRGB">
     <feGaussianBlur stdDeviation="1.6" result="b"/>
@@ -533,6 +555,11 @@
   <details class="card" id="ranksPanel">
     <summary><span data-i18n="ranks">Ranks</span> <span class="summary-note" id="ranksSummary"></span></summary>
     <div id="ladder"></div>
+  </details>
+
+  <details class="card" id="tutorialPanel">
+    <summary data-i18n="tutorial">Tutorial</summary>
+    <div class="tutorial"><p data-i18n="tutorialText"></p><p class="tutorial-tip" data-i18n="tutorialTip"></p></div>
   </details>
 
   <details class="card" id="historyPanel">
@@ -3423,6 +3450,9 @@ const I18N = {
     answerLabel: 'Answer', submit: 'Submit', skip: 'Skip', reveal: 'Reveal solution',
     nextLevel: 'Next level →', nextProblem: 'Next problem →',
     placeholder: 'Your answer', placeholderRoots: 'e.g. -2, 3', placeholderComplex: 'e.g. 3 - 2i',
+    tutorial: 'Tutorial',
+    tutorialText: "The goal here is to wrinkle your brain, so solve every question in your head. All problems have whole-number answers or whole-number coefficients. If you don't know how to solve a certain category of exercises, study it and come back here.",
+    tutorialTip: 'Tip: solve the questions correctly to earn points.',
     ranks: 'Ranks', history: 'History', resetProgress: 'Reset progress', resetConfirm: 'Click again to erase all progress',
     skillBarLabel: 'Skill towards the next rank',
     rankPos: (n, total, tier) => `Rank ${n} of ${total} · ${tier}`,
@@ -3445,7 +3475,7 @@ const I18N = {
     sacrificeConfirm: 'Confirm sacrifice?', keypad: 'Keypad', keyBack: 'Delete', keyMinus: 'Minus', keyComma: 'Comma', keyClear: 'Clear',
     tips: {
       generic: ['Tip: a wrong answer is not a right answer.', 'Tip: there is no time limit, so think it through.', 'Tip: to answer, type the answer.', 'Tip: the answer is always a number you can type.', 'Tip: the keypad works better when you press the keys.', 'Tip: read the problem before answering it. It helps.', 'Tip: if the answer feels wrong, it might be.', 'Tip: double-check before you submit. Or don\'t. Your streak, your call.', 'Tip: every problem has exactly one right answer. Find that one.', 'Tip: the demon is patient. Take your time.', 'Tip: guessing works, just not very often.', 'Tip: the Sacrifice button exists for a reason. A sad one.', 'Tip: staring at the screen harder does not increase your skill. It might, however, increase your thirst.', 'Tip: yes, the problem on the screen is the one you have to solve.', 'Tip: a calculator and paper would be cheating. The demon knows.', 'Tip: your streak is on fire, but relax! In hell, everything is on fire.', 'Tip: breathe in, solve, breathe out, submit.', 'Tip: if you can read this, you are not solving.', 'Tip: nobody ever got a problem right by typing a different problem\'s answer.', 'Tip: the demon grows stronger with every right answer. So do you.', 'Tip: hatred and frustration are not acceptable answers.', 'Tip: cursing at the problem will not solve it, and it might get angry.', 'Tip: do not think too hard about why you keep playing this game.', 'Tip: you get wrong every question you do not try, but sometimes you also get wrong the ones you do.', 'Tip: praying will not help solve this problem.', 'Tip: sometimes there are sums that hurt to solve in your head.', 'Tip: if it were easy, you would not like it.', 'Tip: do you use a calculator? lol', 'Tip: you are just a calculator, and calculators do not get irritated.', 'Tip: if you get it wrong, you lose points.', 'Tip: if you get it right, you gain points.', 'Tip: some children also struggled with this question.', 'Tip: my dog solved this one the day before yesterday, it can\'t be hard.', 'Tip: think harder.', 'Tip: solve it without crying.', 'Tip: crying does not raise your score.', 'Tip: bakers are good at this game.', 'Tip: an AI can solve this faster than you, but it does not complain.', 'Tip: paper and calculator are for dummies.', 'Tip: with time it will hurt less.', 'Tip: can anyone reach the last level without a calculator?'],
-      arithmetic: ['Tip: to get it right, evaluate the expression correctly.', 'Tip: the answer is the value of the whole expression, not just a part of it.', 'Tip: work from the inside out, parentheses first.', 'Tip: multiplication comes before addition, and I don\'t quite remember division, I think it comes first too, right?', 'Tip: the result is one single integer. No more, no less.', 'Tip: if a piece looks scary, solve it on its own first.', 'Tip: minus times minus is plus. Yes, even when it feels wrong.', 'Tip: a big number is just small numbers wearing a baggy coat.', 'Tip: do not trust any fraction that does not divide evenly. Here, they all do.', 'Tip: subtraction is not commutative. Neither is life.', 'Tip: the answer is a number. Not a feeling.', 'Tip: 7 times 8 is not what you wish it was.'],
+      arithmetic: ['Tip: to get it right, evaluate the expression correctly.', 'Tip: the answer is the value of the whole expression, not just a part of it.', 'Tip: work from the inside out, parentheses first.', 'Tip: multiplication comes before addition, and I don\'t quite remember division, I think it comes first too, right?', 'Tip: the result is one single integer. No more, no less.', 'Tip: if a piece looks scary, solve it on its own first.', 'Tip: minus times minus is plus.', 'Tip: a big number is just small numbers wearing a baggy coat.', 'Tip: do not trust any fraction that does not divide evenly. Here, they all do.', 'Tip: subtraction is not commutative. Neither is life.', 'Tip: the answer is a number. Not a feeling.', 'Tip: 7 times 8 is not what you wish it was.'],
       linear: ['Tip: to get it right, solve the equation correctly.', 'Tip: x is the number that makes both sides equal.', 'Tip: whatever you do to one side, do to the other.', 'Tip: check your answer by putting it back in the equation.', 'Tip: there is exactly one x. Go find it.', 'Tip: the answer is x, not the equation.', 'Tip: x is not a mystery, it is just a little shy.', 'Tip: moving a term across the equals sign flips its sign. It is not a ghost, it just got dizzy.', 'Tip: if x came out as a fraction, you divided wrong. Here, x is always an integer.', 'Tip: the equals sign is the middle of a seesaw. Keep it balanced.', 'Tip: dividing by zero makes no sense, unless we are talking about limits.', 'Tip: one equation, one unknown. It is a fair fight.'],
       polynomial: ['Tip: to get it right, find all the roots of the polynomial correctly.', 'Tip: leaving a root out counts as a wrong answer.', 'Tip: a root is a value of x that makes the polynomial zero.', 'Tip: roots here are separated by commas. Not by political disagreements.', 'Tip: negative roots count too.', 'Tip: a polynomial of degree 3 has at most 3 roots.', 'Tip: if x = 0 is a root, you can take x out of everything.', 'Tip: roots can repeat, but you only need to type each one once.', 'Tip: when in doubt, plug the candidate in and see if you get zero.', 'Tip: the roots were there all along. You just have to find them.', 'Tip: factoring is division for adults.'],
       system: ['Tip: to get it right, solve the system correctly.', 'Tip: every unknown needs its own value, in order.', 'Tip: the answer must work in every equation, not just one.', 'Tip: eliminating one unknown at a time is a fine plan.', 'Tip: x first, then y, then the rest. Alphabetical order wins.', 'Tip: all the equations are true at the same time.', 'Tip: a system is just equations that have to get along.', 'Tip: solving for one unknown and plugging it into the others is called substitution, not luck.', 'Tip: if your values only fit one equation, the other equations will notice.', 'Tip: more unknowns do not mean more answers, only more answers to type.', 'Tip: add the equations, subtract the equations, but do not ignore any of them.', 'Tip: the answer is a list of numbers, not a list of complaints.'],
@@ -3484,6 +3514,9 @@ const I18N = {
     answerLabel: 'Resposta', submit: 'Enviar', skip: 'Pular', reveal: 'Revelar solução',
     nextLevel: 'Próximo nível →', nextProblem: 'Próximo problema →',
     placeholder: 'Sua resposta', placeholderRoots: 'ex.: -2, 3', placeholderComplex: 'ex.: 3 - 2i',
+    tutorial: 'Tutorial',
+    tutorialText: 'O objetivo aqui é enrugar seu cérebro, por isso resolva de cabeça todas as questões. Todos os problemas possuem respostas em números inteiros ou possuem coeficientes inteiros. Se você não souber resolver determinada categoria de exercícios, estude e volte aqui.',
+    tutorialTip: 'Dica: resolva as questões corretamente para ganhar pontos.',
     ranks: 'Maestrias', history: 'Histórico', resetProgress: 'Reiniciar progresso', resetConfirm: 'Clique de novo para apagar todo o progresso',
     skillBarLabel: 'Habilidade até a próxima maestria',
     rankPos: (n, total, tier) => `Maestria ${n} de ${total} · ${tier}`,
@@ -3506,7 +3539,7 @@ const I18N = {
     sacrificeConfirm: 'Confirmar sacrifício?', keypad: 'Teclado', keyBack: 'Apagar', keyMinus: 'Menos', keyComma: 'Vírgula', keyClear: 'Limpar',
     tips: {
       generic: ['Dica: uma resposta errada não é uma resposta certa.', 'Dica: não há limite de tempo, pense com calma.', 'Dica: para responder, digite a resposta.', 'Dica: a resposta é sempre um número que dá para digitar.', 'Dica: o teclado funciona melhor quando você aperta as teclas.', 'Dica: leia o problema antes de respondê-lo. Ajuda bastante.', 'Dica: se a resposta parece errada, talvez esteja.', 'Dica: confira antes de enviar. Ou não. A sequência é sua.', 'Dica: todo problema tem exatamente uma resposta certa. Ache essa.', 'Dica: o demônio é paciente. Sem pressa.', 'Dica: chutar funciona, só não funciona muito.', 'Dica: o botão Sacrifício existe por um motivo. Um motivo triste.', 'Dica: olhar mais forte para a tela não aumenta sua habilidade. Pode aumentar a sua sede, no entanto.', 'Dica: sim, o problema na tela é o que você precisa resolver.', 'Dica: calculadora e papel seriam trapaças. O demônio sabe.', 'Dica: sua sequência está pegando fogo, mas fica tranquilo! No inferno tudo está pegando fogo..', 'Dica: inspire, resolva, expire, envie.', 'Dica: se você consegue ler isto, não está resolvendo.', 'Dica: ninguém nunca acertou um problema digitando a resposta de outro problema.', 'Dica: o demônio fica mais forte a cada resposta certa. Você também.', 'Dica: ódio e frustração não são respostas aceitáveis.', 'Dica: xingar o problema não resolve ele, fora que ele pode ficar bravo.', 'Dica: não pense muito o porquê você continua jogando esse jogo.', 'Dica: você erra todas as questões que não tenta, mas às vezes você também erra as que tenta.', 'Dica: rezar não vai ajudar a resolver esse problema.', 'Dica: às vezes tem contas que dói resolver de cabeça.', 'Dica: se fosse fácil você não ia gostar.', 'Dica: você usa calculadora? kk', 'Dica: você é apenas uma calculadora, e calculadora não fica irritada.', 'Dica: se você errar, você perderá pontos.', 'Dica: se você acertar, você ganha pontos.', 'Dica: algumas crianças também tiveram dificuldade com essa questão.', 'Dica: o meu cachorro resolveu essa anteontem, não deve ser difícil.', 'Dica: pense mais.', 'Dica: resolva sem chorar.', 'Dica: chorar não aumenta a pontuação.', 'Dica: padeiros são bons nesse jogo.', 'Dica: uma IA consegue resolver mais rápido do que você, só que ela não reclama.', 'Dica: papel e calculadora é para bobocas.', 'Dica: com o tempo vai ficar menos dolorido.', 'Dica: será que alguém consegue chegar no último nível sem calculadora?'],
-      arithmetic: ['Dica: para acertar, calcule a expressão corretamente.', 'Dica: a resposta é o valor da expressão inteira, não só de uma parte dela.', 'Dica: comece de dentro para fora, parênteses primeiro.', 'Dica: multiplicação vem antes da soma, e a divisão eu não lembro direito, acho que vem antes também né?', 'Dica: o resultado é um único número inteiro. Nem mais, nem menos.', 'Dica: se um pedaço parecer assustador, resolva ele sozinho primeiro.', 'Dica: menos vezes menos dá mais. Sim, mesmo quando parece errado.', 'Dica: número grande é só número pequeno com um casaco largo.', 'Dica: não confie em fração que não divide certinho. Aqui, todas dividem.', 'Dica: subtração não é comutativa. A vida também não.', 'Dica: a resposta é um número. Não um sentimento.', 'Dica: 7 vezes 8 não é o que você gostaria que fosse.'],
+      arithmetic: ['Dica: para acertar, calcule a expressão corretamente.', 'Dica: a resposta é o valor da expressão inteira, não só de uma parte dela.', 'Dica: comece de dentro para fora, parênteses primeiro.', 'Dica: multiplicação vem antes da soma, e a divisão eu não lembro direito, acho que vem antes também né?', 'Dica: o resultado é um único número inteiro. Nem mais, nem menos.', 'Dica: se um pedaço parecer assustador, resolva ele sozinho primeiro.', 'Dica: menos vezes menos dá mais.', 'Dica: número grande é só número pequeno com um casaco largo.', 'Dica: não confie em fração que não divide certinho. Aqui, todas dividem.', 'Dica: subtração não é comutativa. A vida também não.', 'Dica: a resposta é um número. Não um sentimento.', 'Dica: 7 vezes 8 não é o que você gostaria que fosse.'],
       linear: ['Dica: para acertar, resolva a equação corretamente.', 'Dica: x é o número que deixa os dois lados iguais.', 'Dica: o que você faz de um lado, faz do outro.', 'Dica: confira a resposta colocando-a de volta na equação.', 'Dica: existe exatamente um x. Vá achá-lo.', 'Dica: a resposta é o x, não a equação.', 'Dica: o x não é um mistério, ele só é meio tímido.', 'Dica: passar um termo para o outro lado do igual troca o sinal. Não é assombração, ele só ficou tonto.', 'Dica: se o x deu fração, você dividiu errado. Aqui, o x é sempre inteiro.', 'Dica: o sinal de igual é o meio de uma gangorra. Mantenha-a equilibrada.', 'Dica: dividir por zero não faz sentido se não estivermos falando de limite.', 'Dica: uma equação, uma incógnita. É uma luta justa.'],
       polynomial: ['Dica: para acertar, encontre todas as raízes do polinômio corretamente.', 'Dica: esquecer uma raiz conta como resposta errada.', 'Dica: raiz é um valor de x que zera o polinômio.', 'Dica: aqui raízes se separam por vírgula. Não por desavenças políticas', 'Dica: raízes negativas também valem.', 'Dica: um polinômio de grau 3 tem no máximo 3 raízes.', 'Dica: se x = 0 é raiz, dá para colocar x em evidência em tudo.', 'Dica: raízes podem se repetir, mas você só precisa digitar cada uma uma vez.', 'Dica: na dúvida, coloque o candidato no polinômio e veja se dá zero.', 'Dica: as raízes estavam lá o tempo todo. Você só precisa encontrá-las.', 'Dica: fatorar é divisão para adultos.'],
       system: ['Dica: para acertar, resolva o sistema corretamente.', 'Dica: cada incógnita precisa do seu próprio valor, em ordem.', 'Dica: a resposta tem que funcionar em todas as equações, não só em uma.', 'Dica: eliminar uma incógnita de cada vez é um ótimo plano.', 'Dica: x primeiro, depois y, depois o resto. A ordem alfabética vence.', 'Dica: todas as equações são verdadeiras ao mesmo tempo.', 'Dica: um sistema é só um monte de equações que precisam se dar bem.', 'Dica: achar uma incógnita e colocá-la nas outras se chama substituição, não sorte.', 'Dica: se seus valores só servem para uma equação, as outras vão perceber.', 'Dica: mais incógnitas não significam mais respostas, só mais respostas para digitar.', 'Dica: some as equações, subtraia as equações, mas não ignore nenhuma delas.', 'Dica: a resposta é uma lista de números, não uma lista de reclamações.'],
@@ -3959,7 +3992,7 @@ class GameController {
     return Math.max(1, Math.ceil((RankSystem.threshold(next) - rating) / gain));
   }
 
-  /** A harmless, obvious hint under the problem: one about every 20 seconds, visible for a few seconds, then it fades out. */
+  /** A harmless, obvious hint under the problem: one every 30 seconds, visible for 20 seconds, then it fades out. */
   scheduleTip() {
     clearTimeout(this.tipTimer);
     const tip = $('tip');
@@ -3973,9 +4006,9 @@ class GameController {
         if (this.tipPool === this.lastTipPool && i === this.lastTipIndex) i = (i + 1) % n;   // never the same hint twice in a row
         this.tipIndex = i; this.lastTipPool = this.tipPool; this.lastTipIndex = i;
         this.showTip();
-        const visible = 5000 + Math.random() * 3000, period = 18000 + Math.random() * 4000;
+        const visible = 20000, period = 30000;
         setTimeout(() => tip.classList.remove('show'), visible);
-        this.tipTimer = setTimeout(() => cycle(false), period);   // next hint ~20 s after this one appeared
+        this.tipTimer = setTimeout(() => cycle(false), period);   // next hint 30 s after this one appeared (visible for 20 s of them)
       }, first ? 6000 + Math.random() * 6000 : 0);
     };
     cycle(true);
@@ -4052,6 +4085,11 @@ class GameController {
   fx(kind) {
     const card = $('gameCard');
     card.classList.remove('fx-good', 'fx-bad'); void card.offsetWidth; card.classList.add('fx-' + kind);
+    if (kind === 'good') {   // fire on the screen edges, 1 s in total
+      const fire = $('fireFx');
+      fire.classList.remove('on'); void fire.offsetWidth; fire.classList.add('on');
+      clearTimeout(this.fireTimer); this.fireTimer = setTimeout(() => fire.classList.remove('on'), 1050);
+    }
   }
 
   /** Feedback line: stored as (key, args, class) so a language switch can re-word it. */
