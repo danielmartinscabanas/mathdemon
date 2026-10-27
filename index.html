@@ -218,7 +218,7 @@
   .keypad .kp-fn svg { display: block; margin: 0 auto; }
   .keypad .kp[hidden] { display: none; }
   .keypad.has-i .kp-enter { grid-column: span 1; }   /* complex problems: the extra "i" key takes one of the two columns */
-  .keypad .kp-enter { grid-column: span 2; font-size: 20px; font-variant-caps: all-small-caps; letter-spacing: .14em; }
+  .keypad .kp-enter { grid-column: span 2; white-space: nowrap; padding-left: 4px; padding-right: 4px; font-size: 20px; font-variant-caps: all-small-caps; letter-spacing: .14em; }
   .keypad .kp:disabled { opacity: .3; }
   input[type=text], input[type=number], select {
     background-color: var(--sunken); color: var(--text); border: 1px solid var(--line); border-radius: var(--radius);
@@ -3758,6 +3758,14 @@ class GameController {
     this.persist();   // setRangeText fires no input event
   }
 
+  /** The Submit / Next label shrinks until it fits inside its key (a one-column key in complex problems, long words in other languages). */
+  fitEnter() {
+    const b = $('kpEnter');
+    b.style.fontSize = '';
+    let size = parseFloat(getComputedStyle(b).fontSize);
+    while (b.scrollWidth > b.clientWidth && size > 9) { size -= 0.5; b.style.fontSize = `${size}px`; }
+  }
+
   /** Keys reflect the problem: comma only for several solutions; typing keys rest once it is answered. */
   updateKeypad() {
     const s = this.state, done = s.solved || s.revealed;
@@ -3766,6 +3774,7 @@ class GameController {
     const cx = !!this.problem.answer.complex;   // complex answers are typed as a + bi (or "re, im"): an "i" key joins the bottom row
     $('kpI').hidden = !cx; $('kpI').disabled = done; $('keypad').classList.toggle('has-i', cx);
     $('kpEnter').textContent = t(this.nextKey || 'submit');
+    this.fitEnter();
   }
 
   /** Give up the problem: counts as a full defeat, shows the answer, and the next problem is at the same level. */
@@ -4100,7 +4109,8 @@ class GameController {
     kp.addEventListener('pointerdown', e => { if (e.target.closest('.kp')) e.preventDefault(); });   // keep focus in the field, no phone keyboard
     kp.addEventListener('click', e => { const b = e.target.closest('.kp'); if (b && !b.disabled) this.pressKey(b.dataset.k); });
     $('nextBtn').onclick = () => (this.state.solved ? this.advance() : this.skip());
-    window.addEventListener('resize', () => this.fitMath());
+    window.addEventListener('resize', () => { this.fitMath(); this.fitEnter(); });
+    if (document.fonts && document.fonts.ready) document.fonts.ready.then(() => this.fitEnter());
     $('langSel').onchange = e => this.setLanguage(e.target.value);
     $('resetBtn').onclick = () => {
       const b = $('resetBtn');
