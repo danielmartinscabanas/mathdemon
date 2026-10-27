@@ -54,10 +54,14 @@ TOUCH_SIDE, TOUCH_ICON_SIDE, TOUCH_COLORS, TOUCH_BG = 180, 150, 64, (19, 19, 18)
 BEGIN, END = "<!-- ASSETS:BEGIN -->", "<!-- ASSETS:END -->"
 
 
+ALPHA_CUTOFF = 8   # ignore nearly invisible stray pixels (alpha < 8/255) when finding the visible content
+
+
 def load(path):
-    """RGBA image cropped to its visible (non-transparent) content."""
+    """RGBA image cropped to its visible content. Faint stray pixels are ignored, otherwise an almost
+    transparent smudge at one edge would push the real artwork off-centre."""
     im = Image.open(path).convert("RGBA")
-    box = im.getchannel("A").getbbox()
+    box = im.getchannel("A").point(lambda v: 255 if v >= ALPHA_CUTOFF else 0).getbbox()
     return im.crop(box) if box else im
 
 

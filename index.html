@@ -197,6 +197,7 @@
   .mathhtml .frac > .num { border-bottom: .055em solid currentColor; }
   .mathhtml .matrix { display: inline-grid; grid-template-columns: repeat(var(--cols), auto); gap: .12em .9em; padding: .1em .55em; border-left: .075em solid currentColor; border-right: .075em solid currentColor; vertical-align: middle; line-height: 1.3; }
   .mathhtml .matrix .cell { text-align: center; }
+  .mathhtml .sysrow { display: block; margin: .15em 0; text-align: left; }
   .mathhtml .paren.tall { font-size: 1.45em; line-height: 0; vertical-align: -.12em; font-weight: 300; }
   .math-display math { font-size: 2.6rem; font-family: var(--serif); color: var(--text); }
   .math-display math mn { font-variant-numeric: lining-nums; }
@@ -884,9 +885,24 @@ const AST = {
   /** Matrix of expression nodes, and the determinant of a square matrix (root-level node). */
   mat(rows) { return { type: 'mat', rows }; },
   det(matrix) { return { type: 'det', matrix }; },
+  /** System of equations (root only). */
+  sys(eqs) { return { type: 'sys', eqs }; },
+  /** Calculus operations (root only): d/dx of `expr` evaluated at x = `at`, or the definite integral of `expr` from `lo` to `hi`. */
+  deriv(expr, at) { return { type: 'calc', kind: 'deriv', expr, at }; },
+  integ(expr, lo, hi) { return { type: 'calc', kind: 'integ', expr, lo, hi }; },
+  /** sin / cos of a multiple of 30° (`deg`), shown in degrees or, with `rad`, as a fraction of π. A leaf. */
+  trig(fn, deg, rad = false) { return { type: 'trig', fn, deg, rad }; },
+  /** Modulus |arg| of a complex expression. */
+  abs(arg) { return { type: 'abs', arg }; },
+  /** Summation of `body` (in the variable `index`) from lo to hi (root only). */
+  sigma(index, lo, hi, body) { return { type: 'sigma', index, lo, hi, body }; },
   children(n) {
     if (n.type === 'bin' || n.type === 'eq') return [n.left, n.right];
     if (n.type === 'det') return [n.matrix];
+    if (n.type === 'sys') return n.eqs;
+    if (n.type === 'calc') return [n.expr, ...(n.kind === 'deriv' ? [n.at] : [n.lo, n.hi])];
+    if (n.type === 'abs') return [n.arg];
+    if (n.type === 'sigma') return [n.body, n.lo, n.hi];
     if (n.type === 'mat') return n.rows.flat();
     return [];
   },
@@ -894,6 +910,10 @@ const AST = {
     if (n.type === 'bin') return 1 + Math.max(AST.depth(n.left), AST.depth(n.right));
     if (n.type === 'eq') return Math.max(AST.depth(n.left), AST.depth(n.right));
     if (n.type === 'det') return 1 + AST.depth(n.matrix);
+    if (n.type === 'sys') return Math.max(...n.eqs.map(AST.depth));
+    if (n.type === 'calc') return AST.depth(n.expr);
+    if (n.type === 'abs') return 1 + AST.depth(n.arg);
+    if (n.type === 'sigma') return AST.depth(n.body);
     if (n.type === 'mat') return Math.max(0, ...n.rows.flat().map(AST.depth));
     return 0;
   },
@@ -904,6 +924,8 @@ const AST = {
     if (n.left) AST.walk(n.left, fn, n, 'left');
     if (n.right) AST.walk(n.right, fn, n, 'right');
     if (n.type === 'det') AST.walk(n.matrix, fn, n, 'matrix');
+    if (n.type === 'sys') n.eqs.forEach((e, i) => AST.walk(e, fn, n, `eq${i}`));
+    if (n.type === 'calc' || n.type === 'abs' || n.type === 'sigma') AST.children(n).forEach((c, i) => AST.walk(c, fn, n, `c${i}`));
     if (n.type === 'mat') n.rows.forEach((row, i) => row.forEach((e, j) => AST.walk(e, fn, n, `${i},${j}`)));
   },
   maxLeafAbs(n) {
@@ -920,6 +942,29 @@ const AST = {
       switch (n.type) {
         case 'num': if (typeof n.value !== 'bigint') errors.push(`${path}: num value is not a BigInt`); break;
         case 'var': if (!/^[a-z]$/.test(n.name || '')) errors.push(`${path}: invalid variable name`); break;
+        case 'trig':
+          if (!['sin', 'cos'].includes(n.fn) || !Number.isSafeInteger(n.deg) || n.deg % 30 !== 0) errors.push(`${path}: bad trigonometric leaf`);
+          break;
+        case 'abs': visit(n.arg, path + '.abs', false); break;
+        case 'sigma':
+          if (!isRoot) errors.push(`${path}: summation node must be the root`);
+          if (!/^[a-z]$/.test(n.index || '')) errors.push(`${path}: invalid summation index`);
+          visit(n.body, path + '.body', false);
+          for (const b of [n.lo, n.hi]) if (!b || b.type !== 'num') errors.push(`${path}: summation bounds must be numbers`);
+          break;
+        case 'calc': {
+          if (!isRoot) errors.push(`${path}: calculus node must be the root`);
+          const bounds = n.kind === 'deriv' ? [n.at] : n.kind === 'integ' ? [n.lo, n.hi] : null;
+          if (!bounds) { errors.push(`${path}: unknown calculus kind`); break; }
+          visit(n.expr, path + '.f', false);
+          bounds.forEach((b, i) => { if (!b || b.type !== 'num') errors.push(`${path}: bound ${i + 1} must be a number`); });
+          break;
+        }
+        case 'sys':
+          if (!isRoot) errors.push(`${path}: system node must be the root`);
+          if (!Array.isArray(n.eqs) || n.eqs.length < 2 || n.eqs.length > 3) { errors.push(`${path}: a system has 2 or 3 equations`); break; }
+          n.eqs.forEach((e, i) => { if (e && e.type === 'eq') visit(e, `${path}.eq${i}`, true); else errors.push(`${path}.eq${i}: not an equation`); });
+          break;
         case 'eq':
           if (!isRoot) errors.push(`${path}: equation node must be the root`);
           visit(n.left, path + '.L', false); visit(n.right, path + '.R', false); break;
@@ -953,6 +998,11 @@ function findTrivialPatterns(ast) {
     }
     if (n.type !== 'bin') return;
     const L = n.left, R = n.right;
+    if (n.op === 'log') {   // log_b(b^k) with the base repeated gives the answer away
+      if (R.type === 'num' && R.value === L.value) found.push(MathRenderer.toText(n));
+      else if (R.type === 'bin' && R.op === 'pow' && R.left.type === 'num' && R.left.value === L.value) found.push(MathRenderer.toText(n));
+      return;
+    }
     const bad =
       (n.op === 'add' && (isNum(L, 0n) || isNum(R, 0n))) ||
       (n.op === 'sub' && (isNum(L, 0n) || isNum(R, 0n))) ||
@@ -982,7 +1032,7 @@ class OperatorRegistry {
   names() { return [...this.ops.keys()]; }
 }
 
-const OPERATOR_COSTS = { add: 1, sub: 1, mul: 2, div: 3, pow: 4 };
+const OPERATOR_COSTS = { add: 1, sub: 1, mul: 2, div: 3, pow: 4, log: 5 };
 const Operators = new OperatorRegistry();
 
 Operators.register({
@@ -1077,6 +1127,28 @@ Operators.register({
   }
 });
 
+// log(b, a): left is the base, right the argument. Only exact integer logarithms exist (a = b^k).
+Operators.register({
+  name: 'log', label: 'log', text: ' log ', mathml: 'log', precedence: 4, cost: OPERATOR_COSTS.log, weight: 0.5,
+  evaluate(b, a) {
+    if (b < 2n) throw new MathError('BAD_LOG', 'the base must be at least 2');
+    if (a < 1n) throw new MathError('BAD_LOG', 'the argument must be positive');
+    let k = 0n, p = 1n;
+    while (p < a) { p *= b; k++; }
+    if (p !== a) throw new MathError('INEXACT_LOG', `log base ${b} of ${a} is not an integer`);
+    return k;
+  },
+  // target = log_b(b^target): pick a base so that the argument stays human-sized. Needs target >= 2 (log_b(b) = 1 is trivial).
+  decompose(t, ctx) {
+    if (t < 2n || t > 20n) return null;
+    const lim = BI.min(BigInt(ctx.c.maxLeaf) * 10n, ctx.c.maxIntermediate);
+    const bases = [2n, 3n, 4n, 5n, 6n, 7n, 8n, 9n, 10n].filter(b => b ** t <= lim);
+    if (!bases.length) return null;
+    const b = ctx.rng.pick(bases);
+    return { left: b, right: b ** t, leftLeaf: true, rightLeaf2: ctx.rng.chance(0.5) };
+  }
+});
+
 /* ------------------------- ExpressionEvaluator ------------------------- */
 /** Exact BigInt evaluation. Works on the AST, never on rendered strings. */
 class ExpressionEvaluator {
@@ -1111,7 +1183,7 @@ class ExpressionEvaluator {
         return r;
       }
       case 'mat': throw new MathError('BAD_NODE', 'a matrix has no scalar value');
-      case 'eq': throw new MathError('BAD_NODE', 'use evaluateEquation() for equations');
+      case 'eq': case 'sys': case 'calc': throw new MathError('BAD_NODE', 'use evaluateEquation() for equations');
       default: throw new MathError('BAD_NODE', `unknown node type ${node.type}`);
     }
   }
@@ -1159,6 +1231,15 @@ class Poly {
     if (o.degree !== 0) throw new MathError(o.isZero() ? 'DIV_ZERO' : 'NON_POLYNOMIAL', 'division by a non-constant or zero');
     return new Poly(this.c.map(v => v * o.den), this.den * o.c[0]);
   }
+  deriv() { return new Poly(this.c.slice(1).map((v, i) => v * BigInt(i + 1)), this.den); }
+  /** Antiderivative with constant 0. */
+  integral() {
+    let F = 1n;
+    for (let i = 2; i <= this.c.length; i++) F *= BigInt(i);   // common denominator (n!) for 1/(i+1)
+    return new Poly([0n, ...this.c.map((v, i) => v * (F / BigInt(i + 1)))], this.den * F);
+  }
+  /** Exact value at the integer x, as a fraction { n, d }. */
+  at(x) { let n = 0n; for (let i = this.c.length - 1; i >= 0; i--) n = n * x + this.c[i]; return { n, d: this.den }; }
   pow(n) { let r = Poly.constant(1n); for (let i = 0; i < n; i++) r = r.mul(this); return r; }
   static fromAST(node, registry = Operators) {
     switch (node.type) {
@@ -1204,6 +1285,13 @@ const SCORE_WEIGHTS = {
   nesting: 0.6,          // per parenthesised subexpression
   fractionNesting: 1.0,  // per division nested inside another division
   equation: 1.5,         // solving an equation at all
+  varExponent: 3.0,      // per power or logarithm whose exponent / argument contains the unknown
+  sigma: 3.0,            // base cost of a summation (plus 1.5 per decade of terms)
+  trig: 2.5,             // looking up one sin / cos value
+  modulus: 3.0,          // taking a complex modulus
+  calculus: 3.0,         // base cost of a derivative / definite integral
+  calcRule: 1.2,         // per rule applied: each term, product or chain step
+  systemLink: 2.5,       // per equation beyond the first: eliminating / substituting between them
   variable: 1.0,         // per occurrence of the unknown
   degree: 2.0,           // per polynomial degree
   variableProduct: 1.5,  // per product of two unknown-containing factors
@@ -1245,7 +1333,35 @@ class ComplexityScorer {
 
   score(ast) {
     const W = this.w;
-    let ops = 0, opCost = 0, magnitude = 0, exponent = 0, parens = 0, fracNest = 0, varOcc = 0, varProducts = 0, leaves = 0;
+    if (ast.type === 'sigma') {   // the summand, plus summing (or finding the closed form for) all the terms
+      const inner = this.score(ast.body);
+      const terms = Number(ast.hi.value - ast.lo.value) + 1;
+      const extra = W.sigma + 1.5 * Math.log10(Math.max(1, terms)) + this.leafCost(ast.lo.value) + this.leafCost(ast.hi.value);
+      return { total: inner.total + extra, dimensions: { ...inner.dimensions, algebraicComplexity: inner.dimensions.algebraicComplexity + extra }, stats: inner.stats };
+    }
+    if (ast.type === 'calc') {   // the function itself, plus the work of differentiating / integrating it
+      const inner = this.score(ast.expr);
+      let rules = 0;
+      AST.walk(ast.expr, n => {
+        if (n.type === 'bin' && AST.containsVar(n)) rules += n.op === 'mul' && AST.containsVar(n.left) && AST.containsVar(n.right) ? 2 : (n.op === 'pow' && AST.containsVar(n.left) && n.left.type !== 'var' ? 2 : 1);
+      });
+      const bounds = AST.children(ast).slice(1).reduce((sum, b) => sum + this.leafCost(b.value), 0);
+      const extra = W.calculus * (ast.kind === 'integ' ? 1.25 : 1) + W.calcRule * rules + bounds;
+      const dimensions = { ...inner.dimensions, algebraicComplexity: inner.dimensions.algebraicComplexity + extra };
+      return { total: inner.total + extra, dimensions, stats: inner.stats };
+    }
+    if (ast.type === 'sys') {   // sum of the equations, plus the work of combining them
+      const parts = ast.eqs.map(e => this.score(e)), dimensions = {};
+      for (const p of parts) for (const [k, v] of Object.entries(p.dimensions)) dimensions[k] = (dimensions[k] || 0) + v;
+      dimensions.algebraicComplexity += W.systemLink * (ast.eqs.length - 1) * (ast.eqs.length - 1);
+      const sum = f => parts.reduce((a, p) => a + p.stats[f], 0);
+      return {
+        total: Object.values(dimensions).reduce((a, v) => a + v, 0), dimensions,
+        stats: { operations: sum('operations'), depth: Math.max(...parts.map(p => p.stats.depth)), operatorsUsed: [...new Set(parts.flatMap(p => p.stats.operatorsUsed))],
+                 leaves: sum('leaves'), parentheses: 0, variableOccurrences: sum('variableOccurrences'), degree: 1, unfactoredDegree: 0 }
+      };
+    }
+    let ops = 0, opCost = 0, magnitude = 0, exponent = 0, parens = 0, fracNest = 0, varOcc = 0, varProducts = 0, varExp = 0, leaves = 0;
     const used = new Set();
     const visit = (n, parent, side, divDepth) => {
       if (n.type === 'eq') { visit(n.left, null, null, 0); visit(n.right, null, null, 0); return; }
@@ -1257,9 +1373,12 @@ class ComplexityScorer {
         n.matrix.rows.forEach(row => row.forEach(e => visit(e, n, null, 0)));
         return;
       }
+      if (n.type === 'trig') { ops++; opCost += W.trig; used.add('trig'); return; }
+      if (n.type === 'abs') { ops++; opCost += W.modulus; used.add('abs'); visit(n.arg, n, null, 0); return; }
       const op = this.registry.get(n.op);
       ops++; opCost += op.cost; used.add(n.op);
       if (n.op === 'div' && divDepth > 0) fracNest++;
+      if ((n.op === 'pow' || n.op === 'log') && AST.containsVar(n.right)) varExp++;
       if (n.op === 'pow' && n.right.type === 'num') {
         exponent += W.exponentDegree * Math.max(0, BI.toSafeNumber(n.right.value) - 2);
         if (n.left.type === 'num') exponent += W.exponentBase * BI.log10Abs(n.left.value);
@@ -1277,7 +1396,7 @@ class ComplexityScorer {
       try { degree = Math.max(0, Poly.fromAST(ast, this.registry).degree); } catch (e) { degree = 0; }
       unfactored = this.unfactoredDegree(ast, degree);
       algebraic = (ast.type === 'eq' ? W.equation : 0) + W.variable * varOcc + W.degree * degree +
-        W.variableProduct * varProducts + (unfactored >= 2 ? W.factoring * unfactored * (unfactored - 1) : 0);
+        W.variableProduct * varProducts + W.varExponent * varExp + (unfactored >= 2 ? W.factoring * unfactored * (unfactored - 1) : 0);
     }
     const dimensions = {
       operationCount: opCost,
@@ -1325,6 +1444,7 @@ const MathRenderer = {
   needsParens(parent, child, side, mode = 'text') {
     if (!parent || parent.type !== 'bin') return false;
     const op = parent.op;
+    if (op === 'log') return false;                      // base is a subscript, the argument sits in its own brackets
     if (child.type === 'num') {
       if (child.value >= 0n) return false;
       if (mode === 'mathml' && (op === 'div' || (op === 'pow' && side === 'right'))) return false;
@@ -1343,14 +1463,38 @@ const MathRenderer = {
     return side === 'right' && (op === 'sub' || op === 'div');
   },
 
+  /** Angle as a reduced fraction of π: 150° -> { p: 5, q: 6 }. */
+  radParts(deg) { const g = Number(BI.gcd(BigInt(deg), 180n)) || 180; return { p: deg / g, q: 180 / g }; },
+  angleText(n) { if (!n.rad) return `${n.deg}°`; const { p, q } = this.radParts(n.deg); return p === 0 ? '0' : `${p === 1 ? '' : p === -1 ? '-' : p}pi${q === 1 ? '' : '/' + q}`; },
+  angleML(n) {
+    if (!n.rad) return `<mn>${n.deg}</mn><mo>°</mo>`;
+    const { p, q } = this.radParts(n.deg);
+    if (p === 0) return '<mn>0</mn>';
+    const top = `${p < 0 ? '<mo>−</mo>' : ''}${Math.abs(p) === 1 ? '' : `<mn>${Math.abs(p)}</mn>`}<mi>π</mi>`;
+    return q === 1 ? top : `<mfrac><mrow>${top}</mrow><mn>${q}</mn></mfrac>`;
+  },
+  angleH(n) {
+    if (!n.rad) return `<span class="mn">${n.deg}°</span>`;
+    const { p, q } = this.radParts(n.deg);
+    if (p === 0) return '<span class="mn">0</span>';
+    const top = `${p < 0 ? '−' : ''}${Math.abs(p) === 1 ? '' : Math.abs(p)}π`;
+    return q === 1 ? `<span class="mn">${top}</span>` : `<span class="mn">${top}/${q}</span>`;
+  },
+
   toText(n) {
     switch (n.type) {
+      case 'trig': return `${n.fn}(${this.angleText(n)})`;
+      case 'abs': return `|${this.toText(n.arg)}|`;
+      case 'sigma': return `sum_(${n.index}=${this.toText(n.lo)})^${this.toText(n.hi)} (${this.toText(n.body)})`;
       case 'num': return n.value < 0n ? '-' + (-n.value).toString() : n.value.toString();
       case 'var': return n.name;
       case 'eq': return `${this.toText(n.left)} = ${this.toText(n.right)}`;
+      case 'sys': return n.eqs.map(e => this.toText(e)).join('; ');
+      case 'calc': return n.kind === 'deriv' ? `d/dx[${this.toText(n.expr)}]_(x=${this.toText(n.at)})` : `int_${this.toText(n.lo)}^${this.toText(n.hi)} (${this.toText(n.expr)}) dx`;
       case 'mat': return n.rows.map(r => r.map(e => this.toText(e)).join(' ')).join('; ');
       case 'det': return `det[${this.toText(n.matrix)}]`;
       case 'bin': {
+        if (n.op === 'log') return `log_${this.toText(n.left)}(${this.toText(n.right)})`;
         const wrap = (c, side) => { const s = this.toText(c); return this.needsParens(n, c, side, 'text') ? `(${s})` : s; };
         return wrap(n.left, 'left') + Operators.get(n.op).text + wrap(n.right, 'right');
       }
@@ -1371,12 +1515,21 @@ const MathRenderer = {
       case 'num': return `<span class="mn">${n.value < 0n ? '−' + (-n.value) : n.value}</span>`;
       case 'var': return `<span class="mi">${n.name}</span>`;
       case 'eq': return `${this._h(n.left)}&nbsp;<span class="mo">=</span> ${this._h(n.right)}`;
+      case 'sys': return n.eqs.map(e => `<span class="sysrow">${this._h(e)}</span>`).join('');
+      case 'trig': return `<span class="mi">${n.fn}</span>(${this.angleH(n)})`;
+      case 'abs': return `<span class="paren">|</span>${this._h(n.arg)}<span class="paren">|</span>`;
+      case 'sigma': return `<span class="mo">∑</span><sub>${n.index}&nbsp;=&nbsp;${this._h(n.lo)}</sub><sup>${this._h(n.hi)}</sup>&nbsp;${this._hw({ type: 'bin', op: 'mul' }, n.body, 'right')}`;
+      case 'calc': return n.kind === 'deriv'
+        ? `<span class="frac"><span class="num"><span class="mi">d</span></span><span class="den"><span class="mi">d</span><span class="mi">x</span></span></span><span class="paren">[</span>${this._h(n.expr)}<span class="paren">]</span><sub>x&nbsp;=&nbsp;${this._h(n.at)}</sub>`
+        : `<span class="mo">∫</span><sub>${this._h(n.lo)}</sub><sup>${this._h(n.hi)}</sup>&nbsp;${this._h(n.expr)}&nbsp;<span class="mi">d</span><span class="mi">x</span>`;
       case 'det': return `<span class="matrix" style="--cols:${n.matrix.rows.length}">${n.matrix.rows.map(r => r.map(e => `<span class="cell">${this._h(e)}</span>`).join('')).join('')}</span>`;
       case 'bin': {
         if (n.op === 'div') {
           const big = AST.count(n) > 24 ? ' big' : '';   // a long fraction takes a full line instead of being squeezed
           return `<span class="frac${big}"><span class="num">${this._h(n.left)}</span><span class="den">${this._h(n.right)}</span></span>`;
         }
+        if (n.op === 'pow' && n.left.type === 'trig') return `<span class="mi">${n.left.fn}</span><sup>${this._h(n.right)}</sup>(${this.angleH(n.left)})`;
+        if (n.op === 'log') return `<span class="mi">log</span><sub>${this._h(n.left)}</sub>(${this._h(n.right)})`;
         const L = this._hw(n, n.left, 'left');
         if (n.op === 'pow') return `${L}<sup>${this._h(n.right)}</sup>`;
         const R = this._hw(n, n.right, 'right');
@@ -1398,13 +1551,22 @@ const MathRenderer = {
       case 'num': return n.value < 0n ? `<mrow><mo>−</mo><mn>${-n.value}</mn></mrow>` : `<mn>${n.value}</mn>`;
       case 'var': return `<mi mathvariant="normal">${n.name}</mi>`;
       case 'eq': return `${this._ml(n.left)}<mo>=</mo>${this._ml(n.right)}`;
+      case 'calc': return n.kind === 'deriv'
+        ? `<mfrac><mi>d</mi><mrow><mi>d</mi><mi mathvariant="normal">x</mi></mrow></mfrac><msub><mrow><mo>[</mo>${this._ml(n.expr)}<mo>]</mo></mrow><mrow><mi mathvariant="normal">x</mi><mo>=</mo>${this._ml(n.at)}</mrow></msub>`
+        : `<msubsup><mo largeop="true">∫</mo><mrow>${this._ml(n.lo)}</mrow><mrow>${this._ml(n.hi)}</mrow></msubsup><mrow>${this._ml(n.expr)}</mrow><mspace width="0.2em"></mspace><mi>d</mi><mi mathvariant="normal">x</mi>`;
+      case 'trig': return `<mrow><mi>${n.fn}</mi><mo>&#x2061;</mo><mo>(</mo>${this.angleML(n)}<mo>)</mo></mrow>`;
+      case 'abs': return `<mrow><mo>|</mo>${this._ml(n.arg)}<mo>|</mo></mrow>`;
+      case 'sigma': return `<munderover><mo largeop="true">∑</mo><mrow><mi mathvariant="normal">${n.index}</mi><mo>=</mo>${this._ml(n.lo)}</mrow><mrow>${this._ml(n.hi)}</mrow></munderover>${this._wrap({ type: 'bin', op: 'mul' }, n.body, 'right')}`;
+      case 'sys': return `<mrow style="border-left: .085em solid currentColor; padding: .04em .1em .04em .45em"><mtable>${n.eqs.map(e => `<mtr><mtd style="padding: .12em .2em; text-align: left">${this._ml(e)}</mtd></mtr>`).join('')}</mtable></mrow>`;
       // the bars are borders (not stretchy "|" glyphs) so they span the full height of any matrix
       case 'det': return `<mrow style="border-left: .085em solid currentColor; border-right: .085em solid currentColor; padding: .06em .18em"><mtable>${n.matrix.rows.map(r => `<mtr>${r.map(e => `<mtd style="padding: .16em .42em">${this._ml(e)}</mtd>`).join('')}</mtr>`).join('')}</mtable></mrow>`;
       case 'bin': {
         const L = this._wrap(n, n.left, 'left'), R = this._wrap(n, n.right, 'right');
+        if (n.op === 'pow' && n.left.type === 'trig') return `<mrow><msup><mi>${n.left.fn}</mi>${R}</msup><mo>&#x2061;</mo><mo>(</mo>${this.angleML(n.left)}<mo>)</mo></mrow>`;   // sin²(30°)
         switch (n.op) {
           case 'div': return `<mfrac>${L}${R}</mfrac>`;
           case 'pow': return `<msup>${L}${R}</msup>`;
+          case 'log': return `<mrow><msub><mi>log</mi>${L}</msub><mo>&#x2061;</mo><mo>(</mo>${R}<mo>)</mo></mrow>`;
           case 'mul': return `${L}<mo>${this.implicitMul(n) ? '&#x2062;' : '×'}</mo>${R}`;
           default: return `${L}<mo>${Operators.get(n.op).mathml}</mo>${R}`;
         }
@@ -1420,18 +1582,20 @@ const MathRenderer = {
 
   /** What the rendered node starts / ends with: 'digit' | 'var' | 'paren' | 'frac' | 'sup' | 'sign'. */
   _startKind(n) {
-    if (n.type === 'det' || n.type === 'mat') return 'det';
+    if (n.type === 'det' || n.type === 'mat' || n.type === 'calc' || n.type === 'trig' || n.type === 'abs' || n.type === 'sigma') return 'det';
     if (n.type === 'num') return n.value < 0n ? 'sign' : 'digit';
     if (n.type === 'var') return 'var';
     if (n.op === 'div') return 'frac';
+    if (n.op === 'log') return 'det';     // starts with the word "log": never an implicit product
     return this.needsParens(n, n.left, 'left', 'mathml') ? 'paren' : this._startKind(n.left);
   },
   _endKind(n) {
-    if (n.type === 'det' || n.type === 'mat') return 'det';
+    if (n.type === 'det' || n.type === 'mat' || n.type === 'trig' || n.type === 'abs' || n.type === 'sigma') return 'det';
     if (n.type === 'num') return 'digit';
     if (n.type === 'var') return 'var';
     if (n.op === 'div') return 'frac';
     if (n.op === 'pow') return 'sup';
+    if (n.op === 'log') return 'det';
     return this.needsParens(n, n.right, 'right', 'mathml') ? 'paren' : this._endKind(n.right);
   },
   /** Implicit multiplication (3x, 2(x+1), (x−1)(x+2), x²(x−3)) only where it is unambiguous. */
@@ -1559,7 +1723,10 @@ class ExpressionGenerator {
       ctx.used.add(op.name);
       const rem = Math.max(0, budget - op.cost);
       let left, right;
-      if (split.rightLeaf) {
+      if (split.leftLeaf) {   // literal base on the left; the argument is a literal too or a full subexpression
+        left = AST.num(split.left);
+        right = split.rightLeaf2 ? AST.num(split.right) : this._gen(ctx, split.right, rem - this.scorer.leafCost(split.left), depth + 1, false);
+      } else if (split.rightLeaf) {
         right = AST.num(split.right);
         left = this._gen(ctx, split.left, rem - this.scorer.leafCost(split.right), depth + 1, false);
       } else {
@@ -1625,9 +1792,9 @@ const DEFAULT_CONFIG = {
   maxExponent: 5,
   tolerance: 0.1,
   maxAttempts: 8,
-  operators: { add: true, sub: true, mul: true, div: true, pow: true },
+  operators: { add: true, sub: true, mul: true, div: true, pow: true, log: true },
   determinants: true,   // matrix determinants may appear inside arithmetic expressions
-  domains: { arithmetic: true, linear: true, polynomial: true },
+  domains: { arithmetic: true, linear: true, polynomial: true, system: true, exponential: true, derivative: true, integral: true, complex: true, modulus: true, sum: true, trig: true },
   hardLimits: {
     maxAbs: 10n ** 12n,           // absolute bound for any evaluated value
     maxIntermediate: 10n ** 9n,   // ceiling for the per-level intermediate bound
@@ -1638,7 +1805,7 @@ function cloneConfig(c) {
   return { ...c, operators: { ...c.operators }, domains: { ...c.domains }, hardLimits: { ...c.hardLimits } };
 }
 function targetComplexity(level, cfg) { return cfg.baseComplexity + level * cfg.complexityGrowth; }
-function evalLimits(cfg) { return { maxAbs: cfg.hardLimits.maxAbs, maxExponent: cfg.maxExponent, maxMatrix: cfg.hardLimits.maxMatrix }; }
+function evalLimits(cfg) { return { maxAbs: cfg.hardLimits.maxAbs, maxExponent: Math.max(cfg.maxExponent, 40), maxMatrix: cfg.hardLimits.maxMatrix }; }
 function enabledOperators(cfg) { return Object.keys(cfg.operators).filter(k => cfg.operators[k] && Operators.get(k)); }
 
 /**
@@ -1910,6 +2077,495 @@ Domains.register({
   }
 });
 
+/**
+ * Systems of 2 or 3 linear equations in x, y (and z) with a unique integer solution. Backward: pick the
+ * solution first, then a coefficient matrix with a non-zero determinant, then each right-hand side is
+ * the row · solution. The first coefficient of every equation is kept positive (rows are negated).
+ */
+const SYSTEM_VARS = ['x', 'y', 'z'];
+Domains.register({
+  name: 'system', label: 'System of linear equations', prompt: 'Solve the system',
+  answerHint: 'Enter the integer values of x, y (and z) in that order, separated by commas.',
+  weight(T, c, cfg) {
+    const ops = enabledOperators(cfg);
+    if (!['add', 'sub', 'mul'].every(o => ops.includes(o))) return 0;
+    return T >= 12 ? Math.min(0.9, 0.3 + (T - 12) / 30) : 0;
+  },
+  generate(ctx) {
+    const { rng, constraints: c, budget } = ctx;
+    const n = budget >= 30 && rng.chance(Math.min(0.75, (budget - 28) / 50)) ? 3 : 2;
+    const R = Math.min(c.maxRoot, 3 + Math.floor(budget / 8));
+    const M = clamp(1 + Math.floor(budget / (n === 3 ? 12 : 7)), 2, Math.min(c.maxCoef, 9));
+    const zeroP = n === 3 ? 0.3 : 0.1;
+    const sol = Array.from({ length: n }, () => rng.int(-R, R));
+    if (sol.every(v => v === 0)) sol[rng.int(0, n - 1)] = rng.int(1, R);
+    let A = null;
+    for (let tries = 0; tries < 30 && !A; tries++) {
+      const cand = Array.from({ length: n }, () => Array.from({ length: n }, () => (rng.chance(zeroP) ? 0 : rng.int(-M, M))));
+      if (cand.some(row => row.filter(v => v !== 0).length < 2)) continue;
+      if (Matrix.laplace(cand.map(row => row.map(BigInt))) !== 0n) A = cand;
+    }
+    if (!A) throw new MathError('DEGENERATE', 'no invertible coefficient matrix');
+    const eqs = A.map(row => {
+      let b = row.reduce((sum, a, j) => sum + a * sol[j], 0);
+      const flip = row.find(a => a !== 0) < 0 ? -1 : 1;
+      let lhs = null;
+      row.forEach((a0, j) => {
+        const a = a0 * flip;
+        if (a === 0) return;
+        const v = AST.variable(SYSTEM_VARS[j]);
+        const term = Math.abs(a) === 1 ? v : AST.bin('mul', AST.num(BigInt(Math.abs(a))), v);
+        lhs = lhs === null ? term : AST.bin(a < 0 ? 'sub' : 'add', lhs, term);
+      });
+      return AST.eq(lhs, AST.num(BigInt(b * flip)));
+    });
+    return { ast: AST.sys(eqs), answer: { kind: 'tuple', values: sol.map(BigInt) } };
+  }
+});
+
+/**
+ * Equations with the unknown in an exponent or inside a logarithm, always with one integer solution:
+ *   b^(m·x + a) = N          c·b^(m·x + a) ± d = N          log_b(m·x + a) = k          b1^(m1·x + a1) = b2^(m2·x + a2)
+ * Backward: x is chosen first and the constants are derived from it. Exponent and log are strictly
+ * monotone, so the solution is unique; the validator confirms it by scanning a range of integers.
+ */
+Domains.register({
+  name: 'exponential', label: 'Exponential equation', prompt: 'Solve for x', answerHint: 'Enter the integer value of x.',
+  weight(T, c, cfg) {
+    return enabledOperators(cfg).includes('pow') && T >= 8 ? Math.min(0.9, 0.3 + (T - 8) / 30) : 0;
+  },
+  /** The right-hand side: the plain number, or (when the budget has room) an arithmetic expression with that value. */
+  rhsNode(ctx, lhs, value) {
+    const { rng, constraints: c, config, budget, exprGen, scorer } = ctx;
+    const spare = budget - scorer.score(AST.eq(lhs, AST.num(value))).total;
+    if (spare < 6 || value < 2n) return AST.num(value);
+    try {
+      const { ast } = exprGen.generateExpression({ targetValue: value, complexityBudget: spare, allowedOperators: enabledOperators(config), constraints: c, rng });
+      return ast;
+    } catch (e) { if (e instanceof MathError) return AST.num(value); throw e; }
+  },
+  generate(ctx) {
+    const { rng, constraints: c, config, budget } = ctx;
+    const hasLog = enabledOperators(config).includes('log');
+    const num = v => AST.num(BigInt(v)), X = AST.variable();
+    const lin = (m, a) => {   // m·x + a
+      let e = m === 1 ? X : AST.bin('mul', num(m), X);
+      if (a !== 0) e = AST.bin(a < 0 ? 'sub' : 'add', e, num(Math.abs(a)));
+      return e;
+    };
+    const R = Math.min(c.maxRoot, 3 + Math.floor(budget / 10));
+    const maxE = clamp(3 + Math.floor(budget / 6), 3, 14);          // largest exponent value at the solution
+    const bases = budget < 18 ? [2, 3] : budget < 35 ? [2, 3, 4, 5, 10] : [2, 3, 4, 5, 6, 7, 10];
+    const bigM = budget >= 14;
+    const pickM = () => (bigM ? rng.int(1, budget >= 30 ? 4 : 3) : 1);
+    const pow = (b, e) => b ** e;
+    const kinds = [['plain', 3]];
+    if (budget >= 14) kinds.push(['affine', 2]);
+    if (hasLog && budget >= 10) kinds.push(['log', 2.5]);
+    if (budget >= 28) kinds.push(['both', 1.5]);
+    const kind = rng.weighted(kinds, k => k[1])[0];
+    const x0 = rng.int(-R, R);
+
+    if (kind === 'log') {
+      const b = rng.pick(bases.filter(v => v <= 10));
+      const kMax = Math.max(2, Math.min(maxE, Math.floor(Math.log(Math.min(200 + budget * 20, 1e6)) / Math.log(b))));
+      const k = rng.int(2, kMax), arg = pow(b, k);
+      const m = pickM(), xs = Math.floor(arg / m) + rng.int(-3, 3), a = arg - m * xs;
+      const lhs = AST.bin('log', num(b), lin(m, a)), rhs = this.rhsNode(ctx, lhs, BigInt(k));
+      return { ast: rng.chance(0.15) ? AST.eq(rhs, lhs) : AST.eq(lhs, rhs), answer: { kind: 'integer', value: BigInt(xs) } };
+    }
+    if (kind === 'both') {
+      const p = rng.pick([2, 3, 5]), i = rng.int(1, 3), j = rng.int(1, 3);
+      if (i === j) throw new MathError('DEGENERATE', 'same base');
+      const m1 = rng.int(1, 3), m2 = rng.int(1, 3), a1 = rng.int(-6, 6);
+      const need = i * (m1 * x0 + a1) - j * m2 * x0;
+      if (need % j !== 0 || i * m1 === j * m2) throw new MathError('DEGENERATE', 'no integer match');
+      const a2 = need / j, e1 = m1 * x0 + a1, e2 = m2 * x0 + a2;
+      if (e1 < 1 || e2 < 1 || e1 > maxE + 6 || e2 > maxE + 6 || Math.abs(a2) > 25) throw new MathError('DEGENERATE', 'exponent out of range');
+      const side = (base, m, a) => AST.bin('pow', num(base), lin(m, a));
+      return { ast: AST.eq(side(p ** i, m1, a1), side(p ** j, m2, a2)), answer: { kind: 'integer', value: BigInt(x0) } };
+    }
+    const b = rng.pick(bases), m = pickM(), e0 = rng.int(2, maxE), a = e0 - m * x0;
+    if (Math.abs(a) > 30) throw new MathError('DEGENERATE', 'offset too large');
+    let term = AST.bin('pow', num(b), lin(m, a)), N = pow(b, e0);
+    if (kind === 'affine') {
+      const mult = rng.int(2, 5), d = rng.int(1, 20) * (rng.chance(0.5) ? -1 : 1);
+      term = AST.bin('mul', num(mult), term);
+      N = mult * N + d;
+      term = AST.bin(d < 0 ? 'sub' : 'add', term, num(Math.abs(d)));
+      if (N < 1) throw new MathError('DEGENERATE', 'non-positive right side');
+    }
+    if (N > 1e6 || BigInt(N) > c.maxIntermediate) throw new MathError('DEGENERATE', 'right side too large');
+    const rhs = this.rhsNode(ctx, term, BigInt(N));
+    return { ast: rng.chance(0.15) ? AST.eq(rhs, term) : AST.eq(term, rhs), answer: { kind: 'integer', value: BigInt(x0) } };
+  }
+});
+
+/**
+ * Derivatives and definite integrals of polynomial-like functions, always with an integer result.
+ * Derivative: d/dx f(x) evaluated at x = x0, for f an expanded polynomial, a product of two factors
+ * (product rule) or a power of a linear factor (chain rule). Integral: backward, the antiderivative F
+ * has integer coefficients and the integrand is F'; or a power of a linear factor whose bounds make the
+ * result an integer.
+ */
+const Calculus = {
+  X: AST.variable(),
+  num: v => AST.num(BigInt(v)),
+  /** a·x^k as a node (a > 0, k ≥ 0). */
+  term(a, k, v = Calculus.X) {
+    if (k === 0) return Calculus.num(a);
+    const xk = k === 1 ? v : AST.bin('pow', v, Calculus.num(k));
+    return a === 1 ? xk : AST.bin('mul', Calculus.num(a), xk);
+  },
+  /** Σ coef[k]·x^k, highest power first; the leading coefficient is positive so the sum starts without a sign. */
+  sum(coef, v = Calculus.X) {
+    let out = null;
+    for (let k = coef.length - 1; k >= 0; k--) {
+      const a = coef[k];
+      if (!a) continue;
+      const t = Calculus.term(Math.abs(a), k, v);
+      out = out === null ? t : AST.bin(a < 0 ? 'sub' : 'add', out, t);
+    }
+    return out;
+  },
+  /** Random coefficient list of the given degree: positive leading coefficient, about `terms` non-zero entries. */
+  randomCoef(rng, degree, terms, M) {
+    const coef = Array(degree + 1).fill(0);
+    coef[degree] = rng.int(1, M);
+    const spots = [...Array(degree).keys()];
+    for (let i = 0; i < terms - 1 && spots.length; i++) {
+      const k = spots.splice(rng.int(0, spots.length - 1), 1)[0];
+      coef[k] = rng.int(1, M) * (rng.chance(0.5) ? -1 : 1);
+    }
+    return coef;
+  },
+  /** (a·x + b) as a node, a > 0, b ≠ 0. */
+  linear(a, b) { return AST.bin(b < 0 ? 'sub' : 'add', a === 1 ? Calculus.X : AST.bin('mul', Calculus.num(a), Calculus.X), Calculus.num(Math.abs(b))); },
+  /** Symbolic derivative on the AST (sum, product and power rules): the second, independent derivative algorithm. */
+  derive(n) {
+    const zero = Calculus.num(0), one = Calculus.num(1);
+    if (n.type === 'num') return zero;
+    if (n.type === 'var') return one;
+    if (n.type !== 'bin') throw new MathError('NON_POLYNOMIAL', `cannot differentiate ${n.type}`);
+    const dl = () => Calculus.derive(n.left), dr = () => Calculus.derive(n.right);
+    switch (n.op) {
+      case 'add': case 'sub': return AST.bin(n.op, dl(), dr());
+      case 'mul': return AST.bin('add', AST.bin('mul', dl(), n.right), AST.bin('mul', n.left, dr()));
+      case 'pow':
+        if (n.right.type !== 'num') throw new MathError('NON_POLYNOMIAL', 'exponent must be a number');
+        return AST.bin('mul', AST.bin('mul', n.right, AST.bin('pow', n.left, AST.num(n.right.value - 1n))), dl());
+      default: throw new MathError('NON_POLYNOMIAL', `cannot differentiate ${n.op}`);
+    }
+  },
+  budgetShape(ctx, cap) {
+    const { budget, constraints: c, config } = ctx;
+    return {
+      R: Math.min(c.maxRoot, 3 + Math.floor(budget / 15)),
+      M: clamp(2 + Math.floor(budget / 8), 2, 9),
+      degree: clamp(2 + Math.floor(budget / 20), 2, Math.min(cap, config.maxExponent)),
+      terms: clamp(2 + Math.floor(budget / 12), 2, 5)
+    };
+  }
+};
+
+const CALC_OPS = ['add', 'sub', 'mul', 'pow'];
+const calcWeight = (T, cfg) => (CALC_OPS.every(o => enabledOperators(cfg).includes(o)) && T >= 20 ? Math.min(0.8, 0.3 + (T - 20) / 30) : 0);
+
+Domains.register({
+  name: 'derivative', label: 'Derivative', prompt: 'Evaluate the derivative', answerHint: 'Enter a single integer.',
+  weight: (T, c, cfg) => calcWeight(T, cfg),
+  generate(ctx) {
+    const { rng, budget } = ctx;
+    const { R, M, degree, terms } = Calculus.budgetShape(ctx, 5);
+    const x0 = rng.int(-R, R), X = Calculus.X, num = Calculus.num;
+    const kinds = [['poly', 3]];
+    if (budget >= 18) kinds.push(['product', 2]);
+    if (budget >= 22) kinds.push(['chain', 2]);
+    const kind = rng.weighted(kinds, k => k[1])[0];
+    let f;
+    if (kind === 'product') {   // (p)(q): product rule
+      const small = clamp(1 + Math.floor(budget / 40), 1, 2);
+      f = AST.bin('mul', Calculus.sum(Calculus.randomCoef(rng, rng.int(1, small + 1), 2, Math.min(M, 5))), Calculus.sum(Calculus.randomCoef(rng, rng.int(1, small + 1), 2, Math.min(M, 5))));
+    } else if (kind === 'chain') {   // (ax + b)^n, maybe plus a few polynomial terms
+      const n = rng.int(2, clamp(2 + Math.floor(budget / 40), 2, Math.min(4, ctx.config.maxExponent)));
+      let b = rng.int(1, 6) * (rng.chance(0.5) ? -1 : 1);
+      f = AST.bin('pow', Calculus.linear(rng.int(1, 3), b), num(n));
+      if (rng.chance(0.5)) f = AST.bin('add', f, Calculus.sum(Calculus.randomCoef(rng, rng.int(1, 2), 2, Math.min(M, 6))));
+    } else {
+      f = Calculus.sum(Calculus.randomCoef(rng, degree, terms, M));
+    }
+    const d = Poly.fromAST(f).deriv().at(BigInt(x0));
+    return { ast: AST.deriv(f, num(x0)), answer: { kind: 'integer', value: d.n / d.d } };
+  }
+});
+
+Domains.register({
+  name: 'integral', label: 'Definite integral', prompt: 'Evaluate the definite integral', answerHint: 'Enter a single integer.',
+  weight: (T, c, cfg) => calcWeight(T, cfg),
+  generate(ctx) {
+    const { rng, budget } = ctx;
+    const num = Calculus.num;
+    const B = Math.min(ctx.constraints.maxRoot, 3 + Math.floor(budget / 25));
+    const lo = rng.int(-B, B - 1), hi = rng.int(lo + 1, B);
+    let f, value;
+    if (budget >= 22 && rng.chance(0.4)) {   // ∫ (ax + b)^n dx: search for bounds that give an integer
+      for (let tries = 0; tries < 60 && f === undefined; tries++) {
+        const a = rng.int(1, 4), b = rng.int(-5, 5), n = rng.int(2, clamp(2 + Math.floor(budget / 40), 2, Math.min(4, ctx.config.maxExponent)));
+        if (!b) continue;
+        const top = BigInt(a * hi + b) ** BigInt(n + 1), bot = BigInt(a * lo + b) ** BigInt(n + 1), den = BigInt(a * (n + 1));
+        if ((top - bot) % den === 0n) { f = AST.bin('pow', Calculus.linear(a, b), num(n)); value = (top - bot) / den; }
+      }
+    }
+    if (f === undefined) {   // backward: pick the antiderivative F (integer coefficients), the integrand is F'
+      const { M, degree, terms } = Calculus.budgetShape(ctx, 4);
+      const Mi = clamp(1 + Math.floor(budget / 12), 1, 5);
+      const F = Calculus.randomCoef(rng, degree + 1, terms, Mi);
+      F[0] = 0;                                       // the constant never matters
+      const coef = F.slice(1).map((c, k) => c * (k + 1));   // F' coefficients: a_k = (k+1)·c_(k+1)
+      f = Calculus.sum(coef);
+      const at = x => F.reduce((acc, c, k) => acc + BigInt(c) * BigInt(x) ** BigInt(k), 0n);
+      value = at(hi) - at(lo);
+    }
+    return { ast: AST.integ(f, num(lo), num(hi)), answer: { kind: 'integer', value } };
+  }
+});
+
+/* ------------- Complex numbers, summations, trigonometry (exact helpers) ------------- */
+/** Gaussian integers a + bi as { re, im } BigInts, evaluated on the AST ('i' is the variable named i). */
+const Gauss = {
+  eval(n) {
+    switch (n.type) {
+      case 'num': return { re: n.value, im: 0n };
+      case 'var': if (n.name === 'i') return { re: 0n, im: 1n }; break;
+      case 'bin': {
+        const a = Gauss.eval(n.left);
+        if (n.op === 'pow') {
+          if (n.right.type !== 'num' || n.right.value < 0n || n.right.value > 12n) throw new MathError('BAD_NODE', 'exponent must be a small number');
+          let acc = { re: 1n, im: 0n };
+          for (let k = 0n; k < n.right.value; k++) acc = Gauss.mul(acc, a);
+          return acc;
+        }
+        const b = Gauss.eval(n.right);
+        if (n.op === 'add') return { re: a.re + b.re, im: a.im + b.im };
+        if (n.op === 'sub') return { re: a.re - b.re, im: a.im - b.im };
+        if (n.op === 'mul') return Gauss.mul(a, b);
+      }
+    }
+    throw new MathError('BAD_NODE', `cannot evaluate ${n.type} as a complex number`);
+  },
+  mul: (a, b) => ({ re: a.re * b.re - a.im * b.im, im: a.re * b.im + a.im * b.re }),
+  /** Second method: the same expression as a polynomial in i, reduced with i² = −1 (i^k cycles 1, i, −1, −i). */
+  viaPoly(n) {
+    const p = Poly.fromAST(n);
+    if (p.den !== 1n) throw new MathError('NON_INTEGER', 'complex expression is not a Gaussian integer');
+    let re = 0n, im = 0n;
+    p.c.forEach((c, k) => { switch (k % 4) { case 0: re += c; break; case 1: im += c; break; case 2: re -= c; break; default: im -= c; } });
+    return { re, im };
+  },
+  I: AST.variable('i'),
+  /** a + bi as a node, written without trivial parts (no 0 + …, no 1·i). Pure reals need |a| ≥ 2; pure imaginaries b > 0. */
+  node(a, b) {
+    const im = Math.abs(b) === 1 ? Gauss.I : AST.bin('mul', AST.num(BigInt(Math.abs(b))), Gauss.I);
+    if (b === 0) return AST.num(BigInt(a));
+    if (a === 0) return im;
+    return AST.bin(b < 0 ? 'sub' : 'add', AST.num(BigInt(a)), im);
+  },
+  /** "5 − i", "3i", "−2 + 4i" */
+  text(re, im) {
+    let t = re !== 0n ? String(re) : '';
+    if (im !== 0n) { const a = im < 0n ? -im : im, body = (a === 1n ? '' : String(a)) + 'i'; t += t ? (im < 0n ? ' - ' : ' + ') + body : (im < 0n ? '-' : '') + body; }
+    return t || '0';
+  }
+};
+
+/** Exact values (P + Q√3) / D over BigInts, enough for sin and cos at multiples of 30°. */
+const Surd = {
+  of: (p, q = 0n, d = 1n) => ({ p, q, d }),
+  add: (a, b) => ({ p: a.p * b.d + b.p * a.d, q: a.q * b.d + b.q * a.d, d: a.d * b.d }),
+  mul: (a, b) => ({ p: a.p * b.p + 3n * a.q * b.q, q: a.p * b.q + a.q * b.p, d: a.d * b.d }),
+  // sin at 0°, 30°, …, 330° as (p + q√3) / 2
+  SIN: [[0, 0], [1, 0], [0, 1], [2, 0], [0, 1], [1, 0], [0, 0], [-1, 0], [0, -1], [-2, 0], [0, -1], [-1, 0]],
+  trig(fn, deg) {
+    const k = ((((fn === 'cos' ? deg + 90 : deg) / 30) % 12) + 12) % 12, [p, q] = Surd.SIN[k];
+    return { p: BigInt(p), q: BigInt(q), d: 2n };
+  },
+  eval(n) {
+    switch (n.type) {
+      case 'num': return Surd.of(n.value);
+      case 'trig': return Surd.trig(n.fn, n.deg);
+      case 'bin': {
+        const a = Surd.eval(n.left);
+        if (n.op === 'pow') {
+          if (n.right.type !== 'num' || n.right.value < 0n || n.right.value > 8n) throw new MathError('BAD_NODE', 'exponent must be a small number');
+          let acc = Surd.of(1n);
+          for (let k = 0n; k < n.right.value; k++) acc = Surd.mul(acc, a);
+          return acc;
+        }
+        const b = Surd.eval(n.right);
+        if (n.op === 'add') return Surd.add(a, b);
+        if (n.op === 'sub') return Surd.add(a, { p: -b.p, q: -b.q, d: b.d });
+        if (n.op === 'mul') return Surd.mul(a, b);
+      }
+    }
+    throw new MathError('BAD_NODE', `cannot evaluate ${n.type} exactly`);
+  },
+  /** The value when it is an integer, else null. */
+  integer: a => (a.q === 0n && a.p % a.d === 0n ? a.p / a.d : null),
+  /** Second method: floating point, for the validator. */
+  float(n) {
+    switch (n.type) {
+      case 'num': return Number(n.value);
+      case 'trig': return Math[n.fn](n.deg * Math.PI / 180);
+      case 'bin': {
+        const a = Surd.float(n.left), b = Surd.float(n.right);
+        return n.op === 'add' ? a + b : n.op === 'sub' ? a - b : n.op === 'mul' ? a * b : Math.pow(a, b);
+      }
+    }
+    throw new MathError('BAD_NODE', `cannot evaluate ${n.type}`);
+  }
+};
+
+/** 60 · (1^j + 2^j + … + n^j) for j = 0..5, an integer polynomial identity valid for every integer n (Faulhaber). */
+function powerSum60(j, n) {
+  const m = n * (n + 1n);
+  switch (j) {
+    case 0: return 60n * n;
+    case 1: return 30n * m;
+    case 2: return 10n * m * (2n * n + 1n);
+    case 3: return 15n * m * m;
+    case 4: return 2n * m * (2n * n + 1n) * (3n * n * n + 3n * n - 1n);
+    case 5: return 5n * m * m * (2n * n * n + 2n * n - 1n);
+  }
+  throw new MathError('LIMIT', 'degree above 5');
+}
+
+const COMPLEX_OPS = ['add', 'sub', 'mul'];
+Domains.register({
+  name: 'complex', label: 'Complex numbers', prompt: 'Simplify to a + bi', answerHint: 'Enter the answer as a + bi, e.g. 3 - 2i (or just "3, -2").',
+  weight(T, c, cfg) { return COMPLEX_OPS.every(o => enabledOperators(cfg).includes(o)) && T >= 10 ? Math.min(0.6, 0.3 + (T - 10) / 40) : 0; },
+  generate(ctx) {
+    const { rng, budget } = ctx, num = Calculus.num;
+    const M = clamp(2 + Math.floor(budget / 12), 2, 8), count = clamp(2 + Math.floor(budget / 25), 2, 5);
+    const leaf = () => {
+      for (;;) {
+        const a = rng.int(-M, M), b = rng.int(-M, M);
+        if ((b === 0 && Math.abs(a) < 2) || (a === 0 && b < 1) || (a === 0 && b === 0)) continue;
+        return Gauss.node(a, b);
+      }
+    };
+    const items = Array.from({ length: count }, leaf);
+    if (budget >= 20 && rng.chance(0.4)) {   // a power of one operand: z², z³, or i^n
+      const k = rng.int(0, items.length - 1);
+      items[k] = rng.chance(0.3) ? AST.bin('pow', Gauss.I, num(rng.int(2, Math.max(2, Math.min(7, ctx.config.maxExponent))))) : AST.bin('pow', items[k], num(rng.int(2, budget >= 40 ? 3 : 2)));
+    }
+    while (items.length > 1) {
+      const i = rng.int(0, items.length - 2), op = rng.weighted([['mul', 2.5], ['add', 1], ['sub', 1]], x => x[1])[0];
+      items.splice(i, 2, AST.bin(op, items[i], items[i + 1]));
+    }
+    const ast = items[0], z = Gauss.eval(ast);
+    if (ast.type !== 'bin' || !AST.containsVar(ast)) throw new MathError('DEGENERATE', 'no imaginary part to compute');
+    if (BI.abs(z.re) > 5000n || BI.abs(z.im) > 5000n) throw new MathError('DEGENERATE', 'result too large');
+    return { ast, answer: { kind: 'tuple', values: [z.re, z.im], complex: true } };
+  }
+});
+
+Domains.register({
+  name: 'modulus', label: 'Complex modulus', prompt: 'Find the modulus', answerHint: 'Enter a single integer.',
+  weight(T, c, cfg) { return COMPLEX_OPS.every(o => enabledOperators(cfg).includes(o)) && T >= 10 ? Math.min(0.45, 0.2 + (T - 10) / 40) : 0; },
+  generate(ctx) {
+    const { rng, budget } = ctx, num = Calculus.num;
+    const triple = () => {   // (a, b) with a² + b² a perfect square, and that square root
+      const m = rng.int(2, 4 + Math.floor(budget / 20)), n = rng.int(1, m - 1), k = rng.int(1, budget >= 30 ? 3 : 1);
+      let a = (m * m - n * n) * k, b = 2 * m * n * k;
+      if (rng.chance(0.5)) [a, b] = [b, a];
+      return { a: a * (rng.chance(0.5) ? -1 : 1), b: b * (rng.chance(0.5) ? -1 : 1), r: (m * m + n * n) * k };
+    };
+    const kinds = [['triple', 3]];
+    if (budget >= 14) kinds.push(['power', 2]);
+    if (budget >= 22) kinds.push(['product', 2]);
+    const kind = rng.weighted(kinds, k => k[1])[0];
+    let inner, value;
+    if (kind === 'triple') { const t = triple(); inner = Gauss.node(t.a, t.b); value = t.r; }
+    else if (kind === 'product') {
+      const t = triple(), u = triple();
+      inner = AST.bin('mul', Gauss.node(t.a, t.b), Gauss.node(u.a, u.b)); value = t.r * u.r;
+    } else {   // |z^n| = |z|^n, so |z²| = a² + b²
+      const M = clamp(2 + Math.floor(budget / 12), 2, 8);
+      let a = 0, b = 0;
+      while (!a || !b) { a = rng.int(-M, M); b = rng.int(-M, M); }
+      const e = budget >= 40 && rng.chance(0.4) ? 4 : 2, N = a * a + b * b;
+      inner = AST.bin('pow', Gauss.node(a, b), num(e)); value = e === 2 ? N : N * N;
+    }
+    return { ast: AST.abs(inner), answer: { kind: 'integer', value: BigInt(value) } };
+  }
+});
+
+Domains.register({
+  name: 'sum', label: 'Summation', prompt: 'Evaluate the sum', answerHint: 'Enter a single integer.',
+  weight(T, c, cfg) { return ['add', 'sub', 'mul', 'pow'].every(o => enabledOperators(cfg).includes(o)) && T >= 14 ? Math.min(0.6, 0.25 + (T - 14) / 40) : 0; },
+  generate(ctx) {
+    const { rng, budget } = ctx, num = Calculus.num, K = AST.variable('k');
+    const maxTerms = clamp(4 + Math.floor(budget / 4), 4, 40);
+    let lo = rng.chance(0.6) ? 1 : rng.int(-2, 4), body, hi, value = 0n;
+    const geometric = budget >= 24 && rng.chance(0.35);
+    if (geometric) {   // c·r^k, summed term by term or with the closed form
+      const r = rng.pick(budget >= 40 ? [2, 3, 4, 5] : [2, 3]), c = rng.chance(0.4) ? rng.int(2, 4) : 1;
+      lo = Math.max(0, lo);
+      hi = lo + rng.int(3, Math.max(4, Math.min(maxTerms, Math.floor(Math.log(1e6) / Math.log(r)) - lo - 1)));
+      const pw = AST.bin('pow', num(r), K);
+      body = c === 1 ? pw : AST.bin('mul', num(c), pw);
+      for (let k = lo; k <= hi; k++) value += BigInt(c) * BigInt(r) ** BigInt(k);
+    } else {
+      const degree = clamp(1 + Math.floor(budget / 18), 1, 4), M = clamp(2 + Math.floor(budget / 12), 2, 6);
+      const coef = Calculus.randomCoef(rng, degree, clamp(1 + Math.floor(budget / 15), 2, 4), M);
+      body = Calculus.sum(coef, K);
+      hi = lo + rng.int(Math.min(3, maxTerms), maxTerms) - 1;
+      const f = Poly.fromAST(body);
+      for (let k = lo; k <= hi; k++) { const v = f.at(BigInt(k)); value += v.n / v.d; }
+    }
+    return { ast: AST.sigma('k', num(lo), num(hi), body), answer: { kind: 'integer', value } };
+  }
+});
+
+Domains.register({
+  name: 'trig', label: 'Sine and cosine', prompt: 'Evaluate the expression', answerHint: 'Enter a single integer.',
+  weight(T, c, cfg) { return ['add', 'sub', 'mul', 'pow'].every(o => enabledOperators(cfg).includes(o)) && T >= 10 ? Math.min(0.6, 0.3 + (T - 10) / 40) : 0; },
+  /**
+   * Sums of terms c·sin(θ), c·sin(θ)·cos(φ) and c·sin²(θ) at multiples of 30°. Each term has no √3 left in it
+   * (both factors rational or both of the form √3/2), and c clears its denominator, so the total is an integer.
+   */
+  generate(ctx) {
+    const { rng, budget } = ctx, num = Calculus.num;
+    const nTerms = clamp(2 + Math.floor(budget / 20), 2, 4), K = clamp(1 + Math.floor(budget / 10), 1, 6);
+    const rad = budget >= 18 && rng.chance(0.5), wide = budget >= 30;
+    const leaf = () => AST.trig(rng.chance(0.5) ? 'sin' : 'cos', 30 * rng.int(0, 11) + (wide ? 360 * rng.int(-1, 1) : 0), rad);
+    const kinds = [['single', 3]];
+    if (budget >= 14) kinds.push(['square', 2]);
+    if (budget >= 22) kinds.push(['product', 2]);
+    const term = () => {
+      for (let tries = 0; tries < 40; tries++) {
+        const kind = rng.weighted(kinds, k => k[1])[0];
+        const node = kind === 'single' ? leaf() : kind === 'square' ? AST.bin('pow', leaf(), num(2)) : AST.bin('mul', leaf(), leaf());
+        const v = Surd.eval(node);
+        if (v.q !== 0n || v.p === 0n) continue;                 // keep only rational, non-zero terms
+        const need = v.d / BI.gcd(v.d, v.p);                    // smallest coefficient clearing the denominator
+        const c = Number(need) * rng.int(1, K);
+        return { node: c === 1 ? node : AST.bin('mul', num(c), node), value: Surd.mul(Surd.of(BigInt(c)), v) };
+      }
+      throw new MathError('DEGENERATE', 'no rational trigonometric term found');
+    };
+    let ast = null, total = Surd.of(0n);
+    for (let i = 0; i < nTerms; i++) {
+      const t = term(), minus = i > 0 && rng.chance(0.5);
+      ast = ast === null ? t.node : AST.bin(minus ? 'sub' : 'add', ast, t.node);
+      total = Surd.add(total, minus ? { p: -t.value.p, q: 0n, d: t.value.d } : t.value);
+    }
+    const value = Surd.integer(total);
+    if (value === null) throw new MathError('DEGENERATE', 'the total is not an integer');
+    return { ast, answer: { kind: 'integer', value } };
+  }
+});
+
 /* --------------------------- ProblemValidator -------------------------- */
 /**
  * Validation that does not trust the generator: structure, exact evaluation,
@@ -1928,6 +2584,9 @@ class ProblemValidator {
     if (AST.count(problem.ast) > H.maxNodes) errors.push(`node count exceeds ${H.maxNodes}`);
     if (AST.depth(problem.ast) > H.maxDepth) errors.push(`depth exceeds ${H.maxDepth}`);
     if (AST.maxLeafAbs(problem.ast) > c.maxIntermediate) errors.push('literal exceeds the intermediate bound');
+    AST.walk(problem.ast, n => {   // literal exponents obey the configured limit (the evaluator's own guard is higher, for x in an exponent)
+      if (n.type === 'bin' && n.op === 'pow' && n.right.type === 'num' && n.right.value > BigInt(this.config.maxExponent)) errors.push(`exponent ${n.right.value} exceeds ${this.config.maxExponent}`);
+    });
     const trivial = findTrivialPatterns(problem.ast);
     if (trivial.length) errors.push(`trivial subexpression: ${trivial[0]}`);
 
@@ -1986,6 +2645,156 @@ ProblemValidator.register('polynomial', (problem, ev) => {
     if (s.left !== s.right) errors.push(`x = ${r} gives ${s.left} ≠ ${s.right}`);
   }
   return { errors, trace };
+});
+
+ProblemValidator.register('system', (problem, ev) => {
+  const errors = [], trace = [];
+  const eqs = problem.ast.type === 'sys' ? problem.ast.eqs : null;
+  const want = problem.answer.kind === 'tuple' ? problem.answer.values : null;
+  if (!eqs || !want || eqs.length !== want.length) return { errors: ['system shape does not match its answer'], trace };
+  const n = eqs.length, zero = Array(n).fill(0n);
+  const at = (eq, v) => { const env = {}; v.forEach((x, i) => { env[SYSTEM_VARS[i]] = x; }); const s = ev.evaluateEquation(eq, env); return s.left - s.right; };
+  const A = [], b = [];
+  eqs.forEach((eq, i) => {   // coefficients by evaluation; two extra probes confirm each equation is really linear
+    const c0 = at(eq, zero);
+    const row = zero.map((_, j) => at(eq, zero.map((_, k) => (k === j ? 1n : 0n))) - c0);
+    for (const probe of [[2n, 3n, 5n], [-4n, 1n, 7n]]) {
+      const v = probe.slice(0, n);
+      if (at(eq, v) !== c0 + row.reduce((s, a, j) => s + a * v[j], 0n)) errors.push(`equation ${i + 1} is not linear`);
+    }
+    A.push(row); b.push(-c0);
+  });
+  const D = Matrix.bareiss(A);
+  if (D === 0n) { errors.push('the system has no unique solution'); return { errors, trace }; }
+  const got = A.map((_, j) => {   // Cramer's rule with the other determinant algorithm
+    const Aj = A.map((row, i) => row.map((a, k) => (k === j ? b[i] : a)));
+    const Dj = Matrix.laplace(Aj);
+    return Dj % D === 0n ? Dj / D : null;
+  });
+  if (got.some(v => v === null)) errors.push('the unique solution is not an integer');
+  else if (got.join(',') !== want.join(',')) errors.push(`unique solution is (${got}), expected (${want})`);
+  eqs.forEach((eq, i) => { if (at(eq, want) !== 0n) errors.push(`equation ${i + 1} fails for the expected solution`); });
+  return { errors, trace };
+});
+
+ProblemValidator.register('exponential', (problem, ev) => {
+  const errors = [], trace = [];
+  const ast = problem.ast, x0 = problem.answer.value;
+  if (ast.type !== 'eq') return { errors: ['exponential problem is not an equation'], trace };
+  let uses = false;
+  AST.walk(ast, n => { if (n.type === 'bin' && (n.op === 'pow' || n.op === 'log') && AST.containsVar(n.right)) uses = true; });
+  if (!uses) errors.push('no power or logarithm contains the unknown');
+  // Brute force, independent of the generator: integers where every power / logarithm is defined and both sides agree.
+  const span = Number(BI.min(5000n, BI.abs(x0) + 25n)), roots = [];
+  for (let x = -span; x <= span; x++) {
+    try { const s = ev.evaluateEquation(ast, { x: BigInt(x) }); if (s.left === s.right) roots.push(BigInt(x)); }
+    catch (e) { if (!(e instanceof MathError)) throw e; }   // undefined here (negative exponent, inexact log, overflow): not a solution
+  }
+  if (roots.join(',') !== String(x0)) errors.push(`integer solutions are {${roots}}, expected {${x0}}`);
+  const s = ev.evaluateEquation(ast, { x: x0 }, trace);
+  if (s.left !== s.right) errors.push(`x = ${x0} gives ${s.left} ≠ ${s.right}`);
+  return { errors, trace };
+});
+
+ProblemValidator.register('derivative', (problem, ev) => {
+  const errors = [], trace = [], ast = problem.ast;
+  if (ast.type !== 'calc' || ast.kind !== 'deriv') return { errors: ['not a derivative problem'], trace };
+  const x0 = ast.at.value, p = Poly.fromAST(ast.expr);
+  if (p.degree < 1) errors.push('the function is constant');
+  const viaPoly = p.deriv().at(x0);                                           // method 1: expand, then differentiate the polynomial
+  const viaRules = ev.evaluate(Calculus.derive(ast.expr), { x: x0 });         // method 2: sum / product / chain rules on the AST
+  if (viaPoly.n % viaPoly.d !== 0n) errors.push('the derivative value is not an integer');
+  else if (viaPoly.n / viaPoly.d !== viaRules) errors.push(`expansion gives ${viaPoly.n / viaPoly.d} but the rules give ${viaRules}`);
+  if (viaRules !== problem.answer.value) errors.push(`derivative is ${viaRules}, expected ${problem.answer.value}`);
+  return { errors, trace };
+});
+
+ProblemValidator.register('integral', (problem, ev) => {
+  const errors = [], trace = [], ast = problem.ast;
+  if (ast.type !== 'calc' || ast.kind !== 'integ') return { errors: ['not an integral problem'], trace };
+  const lo = ast.lo.value, hi = ast.hi.value, p = Poly.fromAST(ast.expr);
+  if (lo >= hi) errors.push('the lower bound must be below the upper bound');
+  if (p.degree < 1) errors.push('the integrand is constant');
+  if (p.degree > 5) { errors.push('integrand degree above 5'); return { errors, trace }; }
+  const F = p.integral(), a = F.at(lo), b = F.at(hi);      // method 1: antiderivative, F(hi) − F(lo)
+  const num1 = b.n * a.d - a.n * b.d, den1 = a.d * b.d;
+  if (num1 % den1 !== 0n) errors.push('the integral is not an integer');
+  else if (num1 / den1 !== problem.answer.value) errors.push(`integral is ${num1 / den1}, expected ${problem.answer.value}`);
+  // method 2: Boole's rule (five equally spaced samples), exact for polynomials up to degree 5
+  const D = p.den * 4n ** BigInt(Math.max(p.degree, 0)), w = [7n, 32n, 12n, 32n, 7n];
+  let acc = 0n;
+  for (let i = 0; i < 5; i++) {
+    const xp = 4n * lo + BigInt(i) * (hi - lo);                  // sample point xp / 4
+    let n = 0n;
+    for (let k = 0; k <= p.degree; k++) n += p.c[k] * xp ** BigInt(k) * 4n ** BigInt(p.degree - k);
+    acc += w[i] * n;
+  }
+  const numB = (hi - lo) * acc, denB = 90n * D;
+  if (numB * den1 !== num1 * denB) errors.push(`Boole's rule disagrees with the antiderivative (${numB}/${denB} vs ${num1}/${den1})`);
+  return { errors, trace };
+});
+
+ProblemValidator.register('complex', (problem, ev) => {
+  const errors = [], ast = problem.ast, want = problem.answer.values;
+  if (problem.answer.kind !== 'tuple' || want.length !== 2) return { errors: ['complex answer must be (re, im)'], trace: [] };
+  if (!AST.containsVar(ast)) errors.push('no imaginary unit in the expression');
+  const a = Gauss.eval(ast), b = Gauss.viaPoly(ast);
+  if (a.re !== b.re || a.im !== b.im) errors.push(`direct evaluation gives ${Gauss.text(a.re, a.im)} but the polynomial reduction gives ${Gauss.text(b.re, b.im)}`);
+  if (a.re !== want[0] || a.im !== want[1]) errors.push(`value is ${Gauss.text(a.re, a.im)}, expected ${Gauss.text(want[0], want[1])}`);
+  return { errors, trace: [] };
+});
+
+ProblemValidator.register('modulus', (problem, ev) => {
+  const errors = [], ast = problem.ast;
+  if (ast.type !== 'abs') return { errors: ['not a modulus problem'], trace: [] };
+  const a = Gauss.eval(ast.arg), b = Gauss.viaPoly(ast.arg);
+  if (a.re !== b.re || a.im !== b.im) errors.push('the two complex evaluations disagree');
+  const N = a.re * a.re + a.im * a.im, r = BI.iroot(N, 2);
+  if (r * r !== N) errors.push(`the modulus of ${Gauss.text(a.re, a.im)} is not an integer`);
+  else if (r !== problem.answer.value) errors.push(`modulus is ${r}, expected ${problem.answer.value}`);
+  return { errors, trace: [] };
+});
+
+ProblemValidator.register('sum', (problem, ev) => {
+  const errors = [], ast = problem.ast;
+  if (ast.type !== 'sigma') return { errors: ['not a summation'], trace: [] };
+  const lo = ast.lo.value, hi = ast.hi.value;
+  if (hi < lo || hi - lo > 5000n) { errors.push('bad summation bounds'); return { errors, trace: [] }; }
+  let direct = 0n;                                                         // method 1: add the terms one by one
+  for (let k = lo; k <= hi; k++) direct += ev.evaluate(ast.body, { [ast.index]: k });
+  if (direct !== problem.answer.value) errors.push(`the sum is ${direct}, expected ${problem.answer.value}`);
+  let closed = null;                                                       // method 2: closed forms
+  try {
+    const p = Poly.fromAST(ast.body);
+    if (p.degree < 1) errors.push('the summand is constant');
+    let t = 0n;
+    p.c.forEach((c, j) => { t += c * (powerSum60(j, hi) - powerSum60(j, lo - 1n)); });
+    closed = t % (60n * p.den) === 0n ? t / (60n * p.den) : null;
+  } catch (e) {
+    if (!(e instanceof MathError) || e.code !== 'NON_POLYNOMIAL') throw e;
+    let c = 1n, g = ast.body;                                              // c · r^k  ->  c (r^(hi+1) − r^lo) / (r − 1)
+    if (g.type === 'bin' && g.op === 'mul' && g.left.type === 'num') { c = g.left.value; g = g.right; }
+    if (g.type === 'bin' && g.op === 'pow' && g.left.type === 'num' && g.right.type === 'var' && g.left.value >= 2n) {
+      const r = g.left.value;
+      closed = c * (r ** (hi + 1n) - r ** lo) / (r - 1n);
+    } else errors.push('summand is neither a polynomial nor c·r^k');
+  }
+  if (closed === null || closed !== direct) errors.push(`closed form gives ${closed}, the term-by-term sum ${direct}`);
+  return { errors, trace: [] };
+});
+
+ProblemValidator.register('trig', (problem, ev) => {
+  const errors = [], ast = problem.ast;
+  let hasTrig = false;
+  AST.walk(ast, n => { if (n.type === 'trig') hasTrig = true; });
+  if (!hasTrig) errors.push('no sine or cosine in the expression');
+  const exact = Surd.integer(Surd.eval(ast)), approx = Surd.float(ast);   // exact (a + b√3) / d arithmetic, and floating point
+  if (exact === null) errors.push('the exact value is not an integer');
+  else {
+    if (exact !== problem.answer.value) errors.push(`value is ${exact}, expected ${problem.answer.value}`);
+    if (Math.abs(approx - Number(exact)) > 1e-7) errors.push(`floating point gives ${approx}, exact arithmetic ${exact}`);
+  }
+  return { errors, trace: [] };
 });
 
 /* --------------------------- ProblemGenerator -------------------------- */
@@ -2140,8 +2949,13 @@ const RankSystem = {
 function formatAnswer(answer) {
   return answer.kind === 'integer' ? answer.value.toString() : answer.values.join(', ');
 }
+/** "x = 2, y = -3" */
+function tupleText(answer) {
+  if (answer.complex) return Gauss.text(answer.values[0], answer.values[1]);
+  return answer.values.map((v, i) => `${SYSTEM_VARS[i]} = ${v}`).join(', ');
+}
 function parseIntegerList(input) {
-  const cleaned = String(input).replace(/[−–]/g, '-').replace(/\bx\s*=/gi, ' ').trim();
+  const cleaned = String(input).replace(/[−–]/g, '-').replace(/\b[xyz]\s*=/gi, ' ').trim();
   if (!cleaned) return { error: 'empty' };
   const values = [];
   for (const t of cleaned.split(/[\s,;]+/).filter(Boolean)) {
@@ -2150,7 +2964,20 @@ function parseIntegerList(input) {
   }
   return { values };
 }
+/** "3 - 2i", "-i", "2i", "5" -> { re, im }; null when the text is not of that form (the "re, im" list is handled separately). */
+function parseComplex(input) {
+  const s = String(input).replace(/[−–]/g, '-').replace(/\s+/g, '').toLowerCase();
+  if (!s || !/^[+-]?(\d*i|\d+)([+-](\d*i|\d+))*$/.test(s)) return null;
+  let re = 0n, im = 0n;
+  for (const t of s.match(/[+-]?(\d*i|\d+)/g)) {
+    if (t.endsWith('i')) { const c = t.slice(0, -1); im += c === '' || c === '+' ? 1n : c === '-' ? -1n : BigInt(c); }
+    else re += BigInt(t);
+  }
+  return { re, im };
+}
 function checkAnswer(problem, input) {
+  const z = problem.answer.complex ? parseComplex(input) : null;
+  if (z) return { correct: z.re === problem.answer.values[0] && z.im === problem.answer.values[1] };
   const parsed = parseIntegerList(input);
   if (parsed.error) return parsed;
   const ans = problem.answer;
@@ -2158,15 +2985,21 @@ function checkAnswer(problem, input) {
     if (parsed.values.length !== 1) return { error: 'exactlyOne' };
     return { correct: parsed.values[0] === ans.value };
   }
+  if (ans.kind === 'tuple') {   // ordered: x, y, (z)
+    if (parsed.values.length !== ans.values.length) return { error: 'exactlyN', token: ans.values.length };
+    return { correct: parsed.values.every((v, i) => v === ans.values[i]) };
+  }
   const want = ans.values.map(String);
   const got = [...new Set(parsed.values.map(String))];
   const hits = got.filter(g => want.includes(g)).length, wrong = got.length - hits;
   if (hits === want.length && wrong === 0) return { correct: true };
   return { correct: false, wrong, hits, total: want.length };   // partial credit details for feedback
 }
+function logLine(t) { return `log_${t.a}(${t.b}) = ${t.value}`; }
 const OP_SYMBOL = { add: '+', sub: '−', mul: '×', div: '÷', pow: '^' };
 function traceLine(t) {
   if (t.op === 'det') return `det (${t.a}×${t.a}) = ${t.value}`;
+  if (t.op === 'log') return logLine(t);
   const f = v => (v < 0n ? `(${v})` : v.toString());
   return `${f(t.a)} ${OP_SYMBOL[t.op] || t.op} ${f(t.b)} = ${t.value}`;
 }
@@ -2325,7 +3158,8 @@ class TestRunner {
     if (se.length) return;
 
     const hasVar = AST.containsVar(p.ast);
-    const envs = !hasVar ? [{}] : (p.answer.kind === 'integer' ? [{ x: p.answer.value }] : p.answer.values.map(v => ({ x: v })));
+    const noEnv = ['complex', 'modulus', 'sum', 'trig'].includes(p.domain);   // not evaluated with x (own evaluators, checked below)
+    const envs = noEnv ? [] : !hasVar ? [{}] : p.ast.type === 'calc' ? [{ x: 2n }] : p.answer.kind === 'tuple' ? [Object.fromEntries(p.answer.values.map((v, i) => [SYSTEM_VARS[i], v]))] : (p.answer.kind === 'integer' ? [{ x: p.answer.value }] : p.answer.values.map(v => ({ x: v })));
     let intOk = true, divOk = true, expOk = true, resOk = true, msg = '';
     for (const env of envs) {
       AST.walk(p.ast, n => {
@@ -2336,8 +3170,9 @@ class TestRunner {
           if (BI.abs(v) > c.maxIntermediate) { resOk = false; msg = `intermediate ${v} > ${c.maxIntermediate}`; }
           if (n.op === 'div' && ev.evaluate(n.right, env) === 0n) divOk = false;
           if (n.op === 'pow') {
-            const e = n.right.type === 'num' ? n.right.value : null;
-            if (e === null || e < 0n || e > BigInt(cfg.maxExponent)) { expOk = false; msg = `bad exponent in ${MathRenderer.toText(n)}`; }
+            const withVar = AST.containsVar(n.right);   // exponential equations: check the exponent's value at the solution
+            const e = withVar ? ev.evaluate(n.right, env) : n.right.type === 'num' ? n.right.value : null;
+            if (e === null || e < 0n || e > BigInt(withVar ? 40 : cfg.maxExponent)) { expOk = false; msg = `bad exponent in ${MathRenderer.toText(n)}`; }
           }
         } catch (e) {
           msg = `${e.code}: ${e.message}`;
@@ -2362,6 +3197,15 @@ class TestRunner {
       if (p.domain === 'arithmetic') {
         const v = ev.evaluate(p.ast, {});
         record(T.answer, v === p.answer.value, p, `evaluates to ${v}, answer ${p.answer.value}`);
+      } else if (['derivative', 'integral', 'complex', 'modulus', 'sum', 'trig'].includes(p.domain)) {   // two independent methods in the validator
+        const v = ProblemValidator.domainValidators[p.domain](p, ev);
+        record(T.answer, v.errors.length === 0, p, v.errors.join('; '));
+      } else if (p.domain === 'exponential') {   // brute-force scan (see the validator)
+        const v = ProblemValidator.domainValidators.exponential(p, ev);
+        record(T.answer, v.errors.length === 0, p, v.errors.join('; '));
+      } else if (p.domain === 'system') {   // every equation holds for the answer; Cramer's rule (in the validator) gives the same tuple
+        const v = ProblemValidator.domainValidators.system(p, ev);
+        record(T.answer, v.errors.length === 0, p, v.errors.join('; '));
       } else {
         const poly = Poly.fromAST(p.ast);
         if (p.answer.kind === 'integer') {
@@ -2399,7 +3243,7 @@ class TestRunner {
           const s = ev.evaluateEquation(p.ast, env);
           if (s.left !== s.right) { ok = false; m = `x=${env.x}: ${s.left} ≠ ${s.right}`; }
         }
-        const poly = Poly.fromAST(p.ast);
+        const poly = p.domain === 'exponential' ? null : Poly.fromAST(p.ast);   // powers with x in the exponent are not polynomials
         if (p.domain === 'linear' && poly.degree !== 1) { ok = false; m = 'not linear'; }
         if (p.domain === 'polynomial') {
           if (poly.degree < 2) { ok = false; m = 'degree < 2'; }
@@ -2438,7 +3282,7 @@ const I18N = {
     level: 'Level', score: 'Score', streak: 'Streak',
     answerLabel: 'Answer', submit: 'Submit', skip: 'Skip', reveal: 'Reveal solution',
     nextLevel: 'Next level →', nextProblem: 'Next problem →',
-    placeholder: 'Your answer', placeholderRoots: 'e.g. -2, 3',
+    placeholder: 'Your answer', placeholderRoots: 'e.g. -2, 3', placeholderComplex: 'e.g. 3 - 2i',
     ranks: 'Ranks', history: 'History', resetProgress: 'Reset progress', resetConfirm: 'Click again to erase all progress',
     skillBarLabel: 'Skill towards the next rank',
     rankPos: (n, total, tier) => `Rank ${n} of ${total} · ${tier}`,
@@ -2454,7 +3298,7 @@ const I18N = {
     showingLatest: (n, total) => `Showing the latest ${n} of ${total}.`,
     correct: (points, tries) => `Correct! +${points} ${points === 1 ? 'point' : 'points'}${tries > 1 ? ` (after ${tries} tries)` : ''}. Press Enter to continue.`,
     notQuite: 'Not quite. Try again.',
-    errEmpty: 'Enter an answer first.', errNotInteger: tok => `"${tok}" is not an integer.`, errExactlyOne: 'Enter exactly one integer.',
+    errEmpty: 'Enter an answer first.', errNotInteger: tok => `"${tok}" is not an integer.`, errExactlyOne: 'Enter exactly one integer.', errExactlyN: n => `Enter ${n} integers, in order.`,
     rootsWrong: n => (n === 1 ? '1 of your values is not a solution.' : `${n} of your values are not solutions.`),
     rootsHave: (hits, total) => `You have ${hits} of ${total} solutions.`,
     revealed: 'Solution revealed. No points for this problem.',
@@ -2466,7 +3310,15 @@ const I18N = {
     domains: {
       arithmetic: { label: 'Arithmetic', prompt: 'Evaluate the expression', hint: 'Enter a single integer.' },
       linear: { label: 'Linear equation', prompt: 'Solve for x', hint: 'Enter the integer value of x.' },
-      polynomial: { label: 'Polynomial equation', prompt: 'Find every integer solution', hint: 'Enter all solutions separated by commas, e.g. -2, 3' }
+      polynomial: { label: 'Polynomial equation', prompt: 'Find every integer solution', hint: 'Enter all solutions separated by commas, e.g. -2, 3' },
+      complex: { label: 'Complex numbers', prompt: 'Simplify to a + bi', hint: 'Enter the answer as a + bi, e.g. 3 - 2i (or just "3, -2").' },
+      modulus: { label: 'Complex modulus', prompt: 'Find the modulus', hint: 'Enter a single integer.' },
+      sum: { label: 'Summation', prompt: 'Evaluate the sum', hint: 'Enter a single integer.' },
+      trig: { label: 'Sine and cosine', prompt: 'Evaluate the expression', hint: 'Enter a single integer.' },
+      derivative: { label: 'Derivative', prompt: 'Evaluate the derivative', hint: 'Enter a single integer.' },
+      integral: { label: 'Definite integral', prompt: 'Evaluate the definite integral', hint: 'Enter a single integer.' },
+      exponential: { label: 'Exponential equation', prompt: 'Solve for x', hint: 'Enter the integer value of x.' },
+      system: { label: 'System of equations', prompt: 'Solve the system', hint: 'Enter x, y (and z) in order, separated by commas, e.g. 2, -3' }
     },
     rankNames: RANK_NAMES,
     tierNames: RANK_TIERS.map(t => t.name)
@@ -2482,7 +3334,7 @@ const I18N = {
     level: 'Nível', score: 'Pontos', streak: 'Sequência',
     answerLabel: 'Resposta', submit: 'Enviar', skip: 'Pular', reveal: 'Revelar solução',
     nextLevel: 'Próximo nível →', nextProblem: 'Próximo problema →',
-    placeholder: 'Sua resposta', placeholderRoots: 'ex.: -2, 3',
+    placeholder: 'Sua resposta', placeholderRoots: 'ex.: -2, 3', placeholderComplex: 'ex.: 3 - 2i',
     ranks: 'Maestrias', history: 'Histórico', resetProgress: 'Reiniciar progresso', resetConfirm: 'Clique de novo para apagar todo o progresso',
     skillBarLabel: 'Habilidade até a próxima maestria',
     rankPos: (n, total, tier) => `Maestria ${n} de ${total} · ${tier}`,
@@ -2498,7 +3350,7 @@ const I18N = {
     showingLatest: (n, total) => `Mostrando os ${n} mais recentes de ${total}.`,
     correct: (points, tries) => `Correto! +${points} ${points === 1 ? 'ponto' : 'pontos'}${tries > 1 ? ` (após ${tries} tentativas)` : ''}. Pressione Enter para continuar.`,
     notQuite: 'Ainda não. Tente de novo.',
-    errEmpty: 'Digite uma resposta primeiro.', errNotInteger: tok => `"${tok}" não é um número inteiro.`, errExactlyOne: 'Digite exatamente um número inteiro.',
+    errEmpty: 'Digite uma resposta primeiro.', errNotInteger: tok => `"${tok}" não é um número inteiro.`, errExactlyOne: 'Digite exatamente um número inteiro.', errExactlyN: n => `Digite ${n} números inteiros, em ordem.`,
     rootsWrong: n => (n === 1 ? '1 dos seus valores não é solução.' : `${n} dos seus valores não são soluções.`),
     rootsHave: (hits, total) => `Você tem ${hits} de ${total} soluções.`,
     revealed: 'Solução revelada. Nenhum ponto neste problema.',
@@ -2510,7 +3362,15 @@ const I18N = {
     domains: {
       arithmetic: { label: 'Aritmética', prompt: 'Calcule a expressão', hint: 'Digite um único número inteiro.' },
       linear: { label: 'Equação linear', prompt: 'Determine o valor de x', hint: 'Digite o valor inteiro de x.' },
-      polynomial: { label: 'Equação polinomial', prompt: 'Encontre todas as soluções inteiras', hint: 'Digite todas as soluções separadas por vírgula, ex.: -2, 3' }
+      polynomial: { label: 'Equação polinomial', prompt: 'Encontre todas as soluções inteiras', hint: 'Digite todas as soluções separadas por vírgula, ex.: -2, 3' },
+      complex: { label: 'Números complexos', prompt: 'Simplifique para a + bi', hint: 'Digite a resposta como a + bi, ex.: 3 - 2i (ou apenas "3, -2").' },
+      modulus: { label: 'Módulo complexo', prompt: 'Calcule o módulo', hint: 'Digite um único número inteiro.' },
+      sum: { label: 'Somatório', prompt: 'Calcule o somatório', hint: 'Digite um único número inteiro.' },
+      trig: { label: 'Seno e cosseno', prompt: 'Calcule a expressão', hint: 'Digite um único número inteiro.' },
+      derivative: { label: 'Derivada', prompt: 'Calcule a derivada', hint: 'Digite um único número inteiro.' },
+      integral: { label: 'Integral definida', prompt: 'Calcule a integral definida', hint: 'Digite um único número inteiro.' },
+      exponential: { label: 'Equação exponencial', prompt: 'Determine o valor de x', hint: 'Digite o valor inteiro de x.' },
+      system: { label: 'Sistema de equações', prompt: 'Resolva o sistema', hint: 'Digite x, y (e z) em ordem, separados por vírgula, ex.: 2, -3' }
     },
     rankNames: [
       'Novato', 'Acólito', 'Discípulo', 'Iniciado', 'Adepto', 'Ascendente',
@@ -2621,7 +3481,7 @@ class GameController {
     const p = this.problem, d = I18N[LANG].domains[p.domain] || I18N.en.domains[p.domain] || { label: p.label, prompt: p.prompt, hint: p.answerHint };
     $('prPrompt').textContent = d.prompt; $('prDomain').textContent = d.label;
     $('answerHint').textContent = d.hint;
-    $('answerIn').placeholder = t(p.answer.kind === 'roots' ? 'placeholderRoots' : 'placeholder');
+    $('answerIn').placeholder = t(p.answer.complex ? 'placeholderComplex' : p.answer.kind === 'integer' ? 'placeholder' : 'placeholderRoots');
   }
 
   static freshState() {
@@ -2660,7 +3520,7 @@ class GameController {
     ProgressStore.save({
       version: 1, savedAt: Date.now(),
       state: { level: s.level, score: s.score, streak: s.streak, ease: s.ease, index: s.index, seed: s.seed, rating: s.rating, rank: s.rank, bestRank: s.bestRank },
-      current: this.current ? { ...this.current, tries: s.tries, missed: s.missed, solved: s.solved, revealed: s.revealed, recorded: s.recorded, rated: s.rated } : null,
+      current: this.current ? { ...this.current, tries: s.tries, missed: s.missed, solved: s.solved, revealed: s.revealed, recorded: s.recorded, rated: s.rated, draft: $('answerIn').value } : null,
       config: { baseComplexity: c.baseComplexity, complexityGrowth: c.complexityGrowth, magnitudeGrowth: c.magnitudeGrowth,
                 maxExponent: c.maxExponent, domains: c.domains, operators: c.operators },
       history: this.history
@@ -2694,6 +3554,7 @@ class GameController {
     if (this.state.solved) { this.advance(); return; }      // refreshed during the "Correct!" pause
     if (this.state.revealed) { this.newProblem(); return; }
     this.render();
+    if (typeof cur.draft === 'string') $('answerIn').value = cur.draft.slice(0, 80);   // what was typed before the refresh
   }
 
   /** Add the current problem to the history once, when it is solved, skipped or revealed. */
@@ -2759,13 +3620,16 @@ class GameController {
     else if (k === 'back') { if (a === b && a > 0) a--; input.setRangeText('', a, b, 'end'); }
     else input.setRangeText(k === ',' ? ', ' : k, a, b, 'end');
     input.focus({ preventScroll: true });
+    this.persist();   // setRangeText fires no input event
   }
 
   /** Keys reflect the problem: comma only for several solutions; typing keys rest once it is answered. */
   updateKeypad() {
     const s = this.state, done = s.solved || s.revealed;
     $('keypad').querySelectorAll('.kp').forEach(b => { if (b.dataset.k !== 'enter') b.disabled = done; });
-    $('kpComma').disabled = done || this.problem.answer.kind !== 'roots';
+    $('kpComma').disabled = done || this.problem.answer.kind === 'integer';
+    const cx = !!this.problem.answer.complex;   // complex answers are typed as a + bi: the comma key becomes "i"
+    $('kpComma').dataset.k = cx ? 'i' : ','; $('kpComma').textContent = cx ? 'i' : ',';
     $('kpEnter').textContent = t(this.nextKey || 'submit');
   }
 
@@ -2789,7 +3653,7 @@ class GameController {
 
   showAnswer() {
     const p = this.problem, a = p.answer;
-    const text = a.kind === 'roots' ? `x = ${a.values.join(', ')}` : (p.ast.type === 'eq' ? `x = ${a.value}` : `${a.value}`);
+    const text = a.kind === 'tuple' ? tupleText(a) : a.kind === 'roots' ? `x = ${a.values.join(', ')}` : (p.ast.type === 'eq' ? `x = ${a.value}` : `${a.value}`);
     let html = `<div class="answer-reveal"><span class="muted">${escapeHtml(t('answerWas'))}</span><b>${escapeHtml(text.replace(/-/g, '−'))}</b></div>`;
     if (p.solution && p.solution.factored) html += MathRenderer.toMathML(p.solution.factored);
     const box = $('solution');
@@ -3001,7 +3865,7 @@ class GameController {
     if (s.revealed) { this.newProblem(); return; }
     const res = checkAnswer(this.problem, $('answerIn').value);
     if (res.error) {
-      const key = { empty: 'errEmpty', notInteger: 'errNotInteger', exactlyOne: 'errExactlyOne' }[res.error];
+      const key = { empty: 'errEmpty', notInteger: 'errNotInteger', exactlyOne: 'errExactlyOne', exactlyN: 'errExactlyN' }[res.error];
       this.feedback(key, [res.token], 'warn');
       return;
     }
@@ -3058,7 +3922,7 @@ class GameController {
     if (this.state.rated === null) { this.rate(0, 1); this.state.rated = 'lost'; }
     this.record('revealed');
     const box = $('solution');
-    let html = `<div><b>${t('answerWord')}:</b> <span style="font-family:var(--mono)">${p.answer.kind === 'roots' ? 'x ∈ {' + escapeHtml(formatAnswer(p.answer)) + '}' : (p.ast.type === 'eq' ? 'x = ' : '') + escapeHtml(formatAnswer(p.answer))}</span></div>`;
+    let html = `<div><b>${t('answerWord')}:</b> <span style="font-family:var(--mono)">${p.answer.kind === 'tuple' ? escapeHtml(tupleText(p.answer)) : p.answer.kind === 'roots' ? 'x ∈ {' + escapeHtml(formatAnswer(p.answer)) + '}' : (p.ast.type === 'eq' ? 'x = ' : '') + escapeHtml(formatAnswer(p.answer))}</span></div>`;
     if (p.solution && p.solution.factored) {
       html += `<div style="margin-top:8px" class="muted">${t('factoredForm')}</div>${MathRenderer.toMathML(p.solution.factored)}`;
     }
@@ -3092,6 +3956,7 @@ class GameController {
 
   bind() {
     $('submitBtn').onclick = () => this.submit();
+    $('answerIn').addEventListener('input', () => this.persist());
     $('answerIn').addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); this.submit(); } });
     $('newBtn').onclick = () => this.skip();
     $('revealBtn').onclick = () => this.reveal();

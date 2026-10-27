@@ -20,3 +20,6 @@ desktop.ini
 .idea/
 *.swp
 *~
+
+# local previews (not part of the game)
+preview-*.html
