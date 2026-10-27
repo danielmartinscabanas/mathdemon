@@ -185,6 +185,8 @@
   #prPrompt { font-variant-caps: all-small-caps; letter-spacing: .18em; color: var(--text); font-size: 18px; font-weight: 600; }
   #prDomain { font-style: italic; color: var(--muted); font-size: 17px; }
   .sep { width: 6px; height: 6px; background: var(--red); transform: rotate(45deg); flex: none; }
+  .tip { min-height: 1.6em; margin: -6px 12px 12px; text-align: center; font-style: italic; font-size: 16px; color: var(--muted); opacity: 0; transition: opacity .7s var(--ease-out); }
+  .tip.show { opacity: 1; }
   .math-display { min-height: 150px; display: flex; align-items: center; justify-content: center; overflow: hidden; padding: 22px 4px 20px; }
   /* Wrapping renderer for problems too long for one line: lines break after operators, never inside a number or a bracket edge */
   .mathhtml { display: block; max-width: 100%; text-align: center; line-height: 1.75; color: var(--text); font-family: var(--serif); font-variant-numeric: lining-nums; overflow-wrap: anywhere; }
@@ -505,6 +507,7 @@
     <div class="prompt"><span id="prPrompt">Evaluate</span><span class="sep" aria-hidden="true"></span><span id="prDomain"></span></div>
     <div class="math-display" id="mathOut" aria-live="polite"></div>
     <div class="plain dev-only" id="plainOut"></div>
+    <div class="tip" id="tip" aria-live="off"></div>
     <div class="meter dev-only">
       <div class="meter-labels"><span>Complexity <b id="cxActual">0</b></span><span>Target <b id="cxTarget">0</b></span></div>
       <div class="bar"><div id="cxBar"></div><div id="cxMark"></div></div>
@@ -3422,7 +3425,7 @@ const I18N = {
     skillBarLabel: 'Skill towards the next rank',
     rankPos: (n, total, tier) => `Rank ${n} of ${total} · ${tier}`,
     skill: n => `${n} skill`,
-    toNext: (need, num, name) => `${need} to ${num}. ${name}`,
+    toNext: (n, num, name) => `Solve ${n} more to reach level ${num} (${name})`,
     highestRank: 'Highest rank', promoted: 'Promoted', demoted: 'Demoted',
     highestReached: (num, name) => `highest reached: ${num}. ${name}`,
     tierTitle: (numeral, name) => `Tier ${numeral}: ${name}`,
@@ -3438,6 +3441,15 @@ const I18N = {
     rootsHave: (hits, total) => `You have ${hits} of ${total} solutions.`,
     revealed: 'Solution revealed. No points for this problem.',
     sacrificeConfirm: 'Confirm sacrifice?', keypad: 'Keypad', keyBack: 'Delete', keyMinus: 'Minus', keyComma: 'Comma', keyClear: 'Clear',
+    tips: {
+      generic: ['Tip: a wrong answer is not a right answer.', 'Tip: there is no time limit, so think it through.', 'Tip: to answer, type the answer.', 'Tip: the answer is always a number you can type.', 'Tip: the keypad works better when you press the keys.', 'Tip: read the problem before answering it. It helps.', 'Tip: if the answer feels wrong, it might be.', 'Tip: double-check before you submit. Or don\'t. Your streak, your call.', 'Tip: every problem has exactly one right answer. Find that one.', 'Tip: the demon is patient. Take your time.', 'Tip: guessing works, just not very often.', 'Tip: the Sacrifice button exists for a reason. A sad one.'],
+      arithmetic: ['Tip: to get it right, evaluate the expression correctly.', 'Tip: the answer is the value of the whole expression, not just a part of it.', 'Tip: work from the inside out, parentheses first.', 'Tip: multiplication comes before addition, even when you are in a hurry.', 'Tip: the result is one single integer. No more, no less.', 'Tip: if a piece looks scary, solve it on its own first.'],
+      linear: ['Tip: to get it right, solve the equation correctly.', 'Tip: x is the number that makes both sides equal.', 'Tip: whatever you do to one side, do to the other.', 'Tip: check your answer by putting it back in the equation.', 'Tip: there is exactly one x. Go find it.', 'Tip: the answer is x, not the equation.'],
+      polynomial: ['Tip: to get it right, find all the roots of the polynomial correctly.', 'Tip: leaving a root out counts as a wrong answer.', 'Tip: a root is a value of x that makes the polynomial zero.', 'Tip: roots are separated by commas. Roots are not separated by hope.', 'Tip: try the divisors of the last number first.', 'Tip: negative roots count too.'],
+      system: ['Tip: to get it right, solve the system correctly.', 'Tip: every unknown needs its own value, in order.', 'Tip: the answer must work in every equation, not just one.', 'Tip: eliminating one unknown at a time is a fine plan.', 'Tip: x first, then y, then the rest. Alphabetical order wins.', 'Tip: all the equations are true at the same time.'],
+      exponential: ['Tip: to get it right, find the x that makes both sides equal.', 'Tip: the unknown is hiding in the exponent, or inside the log.', 'Tip: a logarithm asks which exponent gives the number.', 'Tip: if the bases match, the exponents must match too.', 'Tip: powers of 2, 3 and 5 are your friends.', 'Tip: put your answer back in the equation. The exponent will tell the truth.'],
+      complex: ['Tip: to get it right, simplify the expression correctly.', 'Tip: a complex answer has two parts: the real and the imaginary.', 'Tip: i times i is minus one. Always.', 'Tip: multiply term by term, then group the i\'s.', 'Tip: the answer looks like a + bi. Type it that way.', 'Tip: the real part and the imaginary part are both integers.']
+    },
     sacrifice: 'Sacrifice', sacrificeTitle: 'Give up this problem: lose skill, see the answer and move on',
     sacrificed: n => `Sacrificed. −${n} skill. Press Enter for the next problem.`,
     answerWas: 'The answer was', sacrificedWord: 'defeat (sacrifice)',
@@ -3474,7 +3486,7 @@ const I18N = {
     skillBarLabel: 'Habilidade até a próxima maestria',
     rankPos: (n, total, tier) => `Maestria ${n} de ${total} · ${tier}`,
     skill: n => `${n} de habilidade`,
-    toNext: (need, num, name) => `${need === 1 ? 'falta' : 'faltam'} ${need} para ${num}. ${name}`,
+    toNext: (n, num, name) => `Resolva mais ${n} para chegar ao nível ${num} (${name})`,
     highestRank: 'Maestria máxima', promoted: 'Promovido', demoted: 'Rebaixado',
     highestReached: (num, name) => `maior alcançada: ${num}. ${name}`,
     tierTitle: (numeral, name) => `Círculo ${numeral}: ${name}`,
@@ -3490,6 +3502,15 @@ const I18N = {
     rootsHave: (hits, total) => `Você tem ${hits} de ${total} soluções.`,
     revealed: 'Solução revelada. Nenhum ponto neste problema.',
     sacrificeConfirm: 'Confirmar sacrifício?', keypad: 'Teclado', keyBack: 'Apagar', keyMinus: 'Menos', keyComma: 'Vírgula', keyClear: 'Limpar',
+    tips: {
+      generic: ['Dica: uma resposta errada não é uma resposta certa.', 'Dica: não há limite de tempo, pense com calma.', 'Dica: para responder, digite a resposta.', 'Dica: a resposta é sempre um número que dá para digitar.', 'Dica: o teclado funciona melhor quando você aperta as teclas.', 'Dica: leia o problema antes de respondê-lo. Ajuda bastante.', 'Dica: se a resposta parece errada, talvez esteja.', 'Dica: confira antes de enviar. Ou não. A sequência é sua.', 'Dica: todo problema tem exatamente uma resposta certa. Ache essa.', 'Dica: o demônio é paciente. Sem pressa.', 'Dica: chutar funciona, só não funciona muito.', 'Dica: o botão Sacrifício existe por um motivo. Um motivo triste.'],
+      arithmetic: ['Dica: para acertar, calcule a expressão corretamente.', 'Dica: a resposta é o valor da expressão inteira, não só de uma parte dela.', 'Dica: comece de dentro para fora, parênteses primeiro.', 'Dica: multiplicação vem antes da soma, mesmo com pressa.', 'Dica: o resultado é um único número inteiro. Nem mais, nem menos.', 'Dica: se um pedaço parecer assustador, resolva ele sozinho primeiro.'],
+      linear: ['Dica: para acertar, resolva a equação corretamente.', 'Dica: x é o número que deixa os dois lados iguais.', 'Dica: o que você faz de um lado, faz do outro.', 'Dica: confira a resposta colocando-a de volta na equação.', 'Dica: existe exatamente um x. Vá achá-lo.', 'Dica: a resposta é o x, não a equação.'],
+      polynomial: ['Dica: para acertar, encontre todas as raízes do polinômio corretamente.', 'Dica: esquecer uma raiz conta como resposta errada.', 'Dica: raiz é um valor de x que zera o polinômio.', 'Dica: raízes se separam por vírgula. Não se separam por esperança.', 'Dica: teste primeiro os divisores do último número.', 'Dica: raízes negativas também valem.'],
+      system: ['Dica: para acertar, resolva o sistema corretamente.', 'Dica: cada incógnita precisa do seu próprio valor, em ordem.', 'Dica: a resposta tem que funcionar em todas as equações, não só em uma.', 'Dica: eliminar uma incógnita de cada vez é um ótimo plano.', 'Dica: x primeiro, depois y, depois o resto. A ordem alfabética vence.', 'Dica: todas as equações são verdadeiras ao mesmo tempo.'],
+      exponential: ['Dica: para acertar, encontre o x que deixa os dois lados iguais.', 'Dica: a incógnita está escondida no expoente, ou dentro do log.', 'Dica: um logaritmo pergunta qual expoente dá o número.', 'Dica: se as bases são iguais, os expoentes também têm que ser.', 'Dica: potências de 2, 3 e 5 são suas amigas.', 'Dica: coloque a resposta de volta na equação. O expoente diz a verdade.'],
+      complex: ['Dica: para acertar, simplifique a expressão corretamente.', 'Dica: uma resposta complexa tem duas partes: a real e a imaginária.', 'Dica: i vezes i é menos um. Sempre.', 'Dica: multiplique termo a termo e depois agrupe os i.', 'Dica: a resposta tem a forma a + bi. Digite assim.', 'Dica: a parte real e a imaginária são números inteiros.']
+    },
     sacrifice: 'Sacrifício', sacrificeTitle: 'Desistir deste problema: perde habilidade, vê a resposta e segue para o próximo',
     sacrificed: n => `Sacrificado. −${n} de habilidade. Pressione Enter para o próximo problema.`,
     answerWas: 'A resposta era', sacrificedWord: 'derrota (sacrifício)',
@@ -3605,6 +3626,7 @@ class GameController {
     Install.updateButton();
     if (this.nextKey) $('nextBtn').textContent = t(this.nextKey);
     this.disarmSacrifice(); this.updateKeypad();
+    if ($('tip').classList.contains('show')) this.showTip();
     if (this.answerShown) this.showAnswer();
     this.showFeedback();
     $('ladder').innerHTML = '';
@@ -3832,7 +3854,7 @@ class GameController {
     $('rankPos').textContent = t('rankPos', i + 1, RankSystem.count, tierName(i));
     $('skillText').textContent = t('skill', RankSystem.points(rating));
     $('rankNext').textContent = pr.next === null ? t('highestRank')
-      : t('toNext', Math.max(1, RankSystem.points(RankSystem.threshold(pr.next)) - RankSystem.points(rating)), pr.next + 1, rankName(pr.next));
+      : t('toNext', this.solvesToNext(rating, pr.next), pr.next + 1, rankName(pr.next));
     $('skillBar').setAttribute('aria-valuenow', Math.round(pr.fraction * 100));
     if (pop) { const box = $('rankBadgeBox'); box.classList.remove('pop'); void box.offsetWidth; box.classList.add('pop'); }
     this.renderLadder(i);
@@ -3928,6 +3950,34 @@ class GameController {
     this.renderRank(this.state.rating, this.state.rank); this.setFill(RankSystem.progress(this.state.rating, this.state.rank).fraction, false);
   }
 
+  /** Problems still to solve to reach `next`, at the pace the current difficulty pays (a clean solve earns K·(1 − expected) rating). */
+  solvesToNext(rating, next) {
+    const s = this.state, D = Math.max(0, Math.min(s.level, Math.floor(rating) + RankSystem.STRETCH) - s.ease);
+    const gain = RankSystem.K * (1 - RankSystem.expected(rating, D));
+    return Math.max(1, Math.ceil((RankSystem.threshold(next) - rating) / gain));
+  }
+
+  /** A harmless, obvious hint under the problem: appears at a random moment, vanishes again after a random time. */
+  scheduleTip() {
+    clearTimeout(this.tipTimer);
+    const tip = $('tip');
+    tip.classList.remove('show');
+    if (Math.random() > 0.55) return;
+    this.tipTimer = setTimeout(() => {
+      const d = this.problem.domain, own = (I18N[LANG].tips[d] || []);
+      this.tipPool = own.length && Math.random() < 0.7 ? d : 'generic';
+      this.tipIndex = Math.floor(Math.random() * I18N[LANG].tips[this.tipPool].length);
+      this.showTip();
+      this.tipTimer = setTimeout(() => tip.classList.remove('show'), 6000 + Math.random() * 9000);
+    }, 3000 + Math.random() * 12000);
+  }
+  showTip() {
+    const tip = $('tip'), pool = I18N[LANG].tips[this.tipPool];
+    if (!pool) return;
+    tip.textContent = pool[this.tipIndex % pool.length];
+    tip.classList.add('show');
+  }
+
   render() {
     const p = this.problem, s = this.state;
     this.hud();
@@ -3948,6 +3998,7 @@ class GameController {
     $('nextBtn').hidden = true; this.nextKey = null;
     this.updateSacrifice();
     this.updateKeypad();
+    this.scheduleTip();
     if (DEV_MODE) { $('dbgLevelIn').value = s.level; $('dbgSeedIn').value = s.seed; this.debug.render(p); }
     input.focus({ preventScroll: true });
   }
@@ -4022,6 +4073,7 @@ class GameController {
       const points = Math.max(1, Math.round(this.problem.complexity.total / (s.tries > 1 ? 2 : 1)));
       s.score += points; s.streak++; s.solved = true;
       this.record('solved', $('answerIn').value);
+      clearTimeout(this.tipTimer); $('tip').classList.remove('show');
       this.feedback('correct', [points, s.tries], 'good');
       $('submitBtn').disabled = true; $('revealBtn').disabled = true;
       this.nextKey = 'nextLevel'; $('nextBtn').textContent = t('nextLevel'); $('nextBtn').hidden = false;
