@@ -23,6 +23,15 @@ The idea behind the project is simple: a small, distraction-free tool to practic
 - **Arithmetic**: addition, subtraction, multiplication, exact division, and integer powers, with nested parentheses.
 - **Linear equations**: solve for `x`.
 - **Polynomial equations**: find every integer solution (type several answers separated by commas, e.g. `-2, 3`).
+- **Logarithms**: exact integer logs inside arithmetic expressions, like `log₂(64) + 3 × 5` (the argument is always a power of the base).
+- **Exponential equations**: the unknown in an exponent or inside a logarithm, such as `3^(2x − 1) = 81`, `2·5^(x + 1) − 7 = 243` or `log₂(3x + 10) = 6`. One integer solution each, positive or negative; the right side becomes a full arithmetic expression at higher levels.
+- **Derivatives**: `d/dx [f(x)]` evaluated at a point, for polynomials, products (product rule) and powers of a linear factor (chain rule).
+- **Definite integrals**: `∫ f(x) dx` between two integer bounds, always with an integer result.
+- **Complex numbers**: simplify expressions with `i` to `a + bi` (type it as `3 - 2i`, or just the real and imaginary parts, `3, -2`; the keypad comma key becomes `i`), and find the modulus of a complex number, like `|(3 + 4i)(5 + 12i)|`.
+- **Summations**: `∑ f(k)` between two bounds, for polynomial and geometric terms (closed forms help).
+- **Sine and cosine**: exact values at multiples of 30°, in degrees and in radians (π/6, 5π/3, …), combined so the result is always an integer, like `4·sin(30°) + 8·cos²(60°)`.
+- **Systems of linear equations**: 2 equations (x, y) and later 3 equations (x, y, z), always with a single integer solution (positive or negative). Type the values in order, separated by commas, e.g. `2, -3`.
+- **Matrix determinants**: now and then a part of an arithmetic expression is a determinant, like `3 × |2 1; 4 5| − 7`. Early levels get small 2×2 ones; from level 14 bigger 3×3 ones appear, with larger entries as you level up. Zeros in a matrix give the in-between difficulties (you can expand along the row with the most zeros).
 
 Difficulty is not just "bigger numbers". Each problem is built from a complexity budget that grows with your level: more operations, deeper nesting, richer operators, larger exponents, and more algebra, while the numbers themselves stay human-sized.
 
@@ -98,6 +107,7 @@ No machine learning and no pre-written problem lists. Problems are generated pro
 - A **complexity budget** that grows with the level controls how hard each problem is, and a scoring function measures the real complexity of what was generated.
 - Everything is computed with exact **BigInt** integer arithmetic, so there are no rounding errors, divisions are always exact, and every answer is validated independently of how the problem is displayed.
 - Generation is deterministic: the same seed and settings always produce the same problems.
+- Determinants are built backward too: a subexpression that must equal some value `v` becomes a matrix whose determinant is exactly `v` (random matrix, with one entry solved to hit the value). Every determinant is checked with two independent algorithms (cofactor expansion and Bareiss elimination).
 
 ## Developer mode
 
