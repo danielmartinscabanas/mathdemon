@@ -165,7 +165,8 @@
   .rank-foot { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: baseline; gap: 2px 10px; font-size: 15px; color: var(--muted); font-variant-numeric: lining-nums; }
   .skill-delta { font-weight: 700; }
   #skillText { white-space: nowrap; }
-  #rankNext { margin-left: auto; text-align: right; }
+  #rankNext { margin-left: auto; text-align: right; text-wrap: balance; }
+  .nw { white-space: nowrap; }   /* rank name and (level N) never split across lines */
   .skill-delta.up { color: var(--green); } .skill-delta.down { color: var(--red); }
   @keyframes pop { 0% { transform: scale(.6); } 60% { transform: scale(1.12); } 100% { transform: scale(1); } }
   @keyframes barShake { 0%, 100% { transform: translateX(0); } 30% { transform: translateX(-4px); } 70% { transform: translateX(4px); } }
@@ -445,7 +446,8 @@
     .rank-badge { width: 60px; height: 60px; }
     .rank-name { font-size: 21px; }
     .rank-body { min-width: 0; }
-    .rank-pos { white-space: normal; }
+    .rank-pos { white-space: normal; text-wrap: balance; }
+    #rankNext { flex-basis: 100%; margin-left: 0; text-align: left; }   /* the next-rank line gets its own full-width row below the skill points */
     .lang select { font-size: 16px; min-height: 40px; }   /* 16px+ stops iOS zooming on focus */
     #resetBtn { min-height: 40px; }
     .answer-row button, .actions button { flex: 1; }
@@ -3425,7 +3427,7 @@ const I18N = {
     skillBarLabel: 'Skill towards the next rank',
     rankPos: (n, total, tier) => `Rank ${n} of ${total} · ${tier}`,
     skill: n => `${n} skill`,
-    toNext: (n, num, name) => `Solve ${n} more to reach level ${num} (${name})`,
+    toNext: (n, num, name) => `Solve ${n} more to become <b class="nw">${name}</b> <span class="nw">(level ${num})</span>`,   // name arrives HTML-escaped
     highestRank: 'Highest rank', promoted: 'Promoted', demoted: 'Demoted',
     highestReached: (num, name) => `highest reached: ${num}. ${name}`,
     tierTitle: (numeral, name) => `Tier ${numeral}: ${name}`,
@@ -3486,7 +3488,7 @@ const I18N = {
     skillBarLabel: 'Habilidade até a próxima maestria',
     rankPos: (n, total, tier) => `Maestria ${n} de ${total} · ${tier}`,
     skill: n => `${n} de habilidade`,
-    toNext: (n, num, name) => `Resolva mais ${n} para chegar ao nível ${num} (${name})`,
+    toNext: (n, num, name) => `Resolva mais ${n} para se tornar <b class="nw">${name}</b> <span class="nw">(nível ${num})</span>`,
     highestRank: 'Maestria máxima', promoted: 'Promovido', demoted: 'Rebaixado',
     highestReached: (num, name) => `maior alcançada: ${num}. ${name}`,
     tierTitle: (numeral, name) => `Círculo ${numeral}: ${name}`,
@@ -3853,8 +3855,8 @@ class GameController {
     $('rankName').textContent = rankName(i);
     $('rankPos').textContent = t('rankPos', i + 1, RankSystem.count, tierName(i));
     $('skillText').textContent = t('skill', RankSystem.points(rating));
-    $('rankNext').textContent = pr.next === null ? t('highestRank')
-      : t('toNext', this.solvesToNext(rating, pr.next), pr.next + 1, rankName(pr.next));
+    $('rankNext').innerHTML = pr.next === null ? escapeHtml(t('highestRank'))
+      : t('toNext', this.solvesToNext(rating, pr.next), pr.next + 1, escapeHtml(rankName(pr.next)));
     $('skillBar').setAttribute('aria-valuenow', Math.round(pr.fraction * 100));
     if (pop) { const box = $('rankBadgeBox'); box.classList.remove('pop'); void box.offsetWidth; box.classList.add('pop'); }
     this.renderLadder(i);
