@@ -23,13 +23,10 @@ The idea behind the project is simple: a small, distraction-free tool to practic
 - **Arithmetic**: addition, subtraction, multiplication, exact division, and integer powers, with nested parentheses.
 - **Linear equations**: solve for `x`.
 - **Polynomial equations**: find every integer solution (type several answers separated by commas, e.g. `-2, 3`).
+- **Calculus, sums, moduli and trigonometry inside the expression tree**: from level ~15 on, parts of an arithmetic expression can be a derivative at a point (`d/dx[…]ₓ₌₂`), a definite integral, a summation `∑`, the modulus of a complex number `|3 + 4i|`, or a combination of sin / cos at multiples of 30° (degrees or radians). They are joined to the rest with +, − or ×, so they get more frequent and bigger as the level rises (at the top levels one expression can hold several). Each one is re-checked by a second, independent algorithm.
 - **Logarithms**: exact integer logs inside arithmetic expressions, like `log₂(64) + 3 × 5` (the argument is always a power of the base).
 - **Exponential equations**: the unknown in an exponent or inside a logarithm, such as `3^(2x − 1) = 81`, `2·5^(x + 1) − 7 = 243` or `log₂(3x + 10) = 6`. One integer solution each, positive or negative; the right side becomes a full arithmetic expression at higher levels.
-- **Derivatives**: `d/dx [f(x)]` evaluated at a point, for polynomials, products (product rule) and powers of a linear factor (chain rule).
-- **Definite integrals**: `∫ f(x) dx` between two integer bounds, always with an integer result.
-- **Complex numbers**: simplify expressions with `i` to `a + bi` (type it as `3 - 2i`, or just the real and imaginary parts, `3, -2`; the keypad comma key becomes `i`), and find the modulus of a complex number, like `|(3 + 4i)(5 + 12i)|`.
-- **Summations**: `∑ f(k)` between two bounds, for polynomial and geometric terms (closed forms help).
-- **Sine and cosine**: exact values at multiples of 30°, in degrees and in radians (π/6, 5π/3, …), combined so the result is always an integer, like `4·sin(30°) + 8·cos²(60°)`.
+- **Complex numbers**: simplify expressions with `i` to `a + bi` (type it as `3 - 2i`, or just the real and imaginary parts, `3, -2`; the keypad comma key becomes `i`).
 - **Systems of linear equations**: 2 equations (x, y) and later 3 equations (x, y, z), always with a single integer solution (positive or negative). Type the values in order, separated by commas, e.g. `2, -3`.
 - **Matrix determinants**: now and then a part of an arithmetic expression is a determinant, like `3 × |2 1; 4 5| − 7`. Early levels get small 2×2 ones; from level 14 bigger 3×3 ones appear, with larger entries as you level up. Zeros in a matrix give the in-between difficulties (you can expand along the row with the most zeros).
 
