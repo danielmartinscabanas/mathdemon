@@ -62,8 +62,8 @@
      Each layer is wider than the screen by one tile and slides exactly one tile, so the loop is seamless. */
   .fog { position: fixed; inset: 0; z-index: -1; overflow: hidden; pointer-events: none; }
   .fog i { position: absolute; display: block; will-change: transform; }
-  .fog .mist { inset: -1000px; background-image: var(--fog-mist); background-size: 1000px 1000px; opacity: .92; animation: driftMist 185s linear infinite; }
-  .fog .haze { inset: -760px; background-image: var(--fog-haze); background-size: 760px 760px; opacity: .09; animation: driftHaze 245s linear infinite; }
+  .fog .mist { inset: -1000px; background-image: var(--fog-mist); background-size: 1000px 1000px; opacity: .92; animation: driftMist 185s steps(1000) infinite; }   /* 1 px steps (~5 per second): the fog drifts the same, but the screen is recomposited 12x less often */
+  .fog .haze { inset: -760px; background-image: var(--fog-haze); background-size: 760px 760px; opacity: .09; animation: driftHaze 245s steps(760) infinite; }
   @keyframes driftMist { to { transform: translate(1000px, 400px); } }
   @keyframes driftHaze { to { transform: translate(760px, -760px); } }
   @media (prefers-reduced-motion: reduce) { .fog i { animation: none; } }
@@ -126,7 +126,7 @@
     background-blend-mode: overlay, multiply;
     background-repeat: repeat, repeat, no-repeat;
     filter: url(#flame); opacity: .85;
-    animation: streakFire 1.6s linear infinite;
+    animation: streakFire 1.6s steps(20) infinite;   /* ~12 flicker frames per second: looks like fire, costs a fraction of 60 fps */
   }
   @keyframes streakFire {
     from { background-position: 0 0, 0 0, 0 100%; }
@@ -143,7 +143,7 @@
     background-image: var(--fire-a), var(--fire-b), linear-gradient(0deg, #fff 0%, #d4d4d4 28%, #7c7c7c 58%, #2c2c2c 100%);
     background-size: 120px 160px, 140px 210px, 100% 105%; background-position: 0 0, 0 0, 0 100%;   /* steeper heat: shorter, sparser tongues */
     background-blend-mode: overlay, multiply; background-repeat: repeat, repeat, no-repeat;
-    filter: url(#flame); animation: streakFire .6s linear infinite;
+    filter: url(#flame); animation: streakFire .6s steps(8) infinite;
   }
   #fireFx .ff-b { left: 0; bottom: 0; width: 100%; }
   #fireFx .ff-t { left: 100%; top: var(--fh); width: 100%; transform: rotate(180deg); }
