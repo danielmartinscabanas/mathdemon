@@ -969,7 +969,7 @@ const AST = {
         }
         case 'sys':
           if (!isRoot) errors.push(`${path}: system node must be the root`);
-          if (!Array.isArray(n.eqs) || n.eqs.length < 2 || n.eqs.length > 4) { errors.push(`${path}: a system has 2 to 4 equations`); break; }
+          if (!Array.isArray(n.eqs) || n.eqs.length < 2 || n.eqs.length > 6) { errors.push(`${path}: a system has 2 to 6 equations`); break; }
           n.eqs.forEach((e, i) => { if (e && e.type === 'eq') visit(e, `${path}.eq${i}`, true); else errors.push(`${path}.eq${i}: not an equation`); });
           break;
         case 'eq':
@@ -1330,7 +1330,7 @@ const SCORE_WEIGHTS = {
   modulus: 3.0,          // taking a complex modulus
   calculus: 3.0,         // base cost of a derivative / definite integral
   calcRule: 1.2,         // per rule applied: each term, product or chain step
-  systemLink: 2.5,       // per equation beyond the first: eliminating / substituting between them
+  systemLink: 1.5,       // per pair of equations: eliminating / substituting between them
   variable: 1.0,         // per occurrence of the unknown
   degree: 2.0,           // per polynomial degree
   variableProduct: 1.5,  // per product of two unknown-containing factors
@@ -1392,7 +1392,7 @@ class ComplexityScorer {
     if (ast.type === 'sys') {   // sum of the equations, plus the work of combining them
       const parts = ast.eqs.map(e => this.score(e)), dimensions = {};
       for (const p of parts) for (const [k, v] of Object.entries(p.dimensions)) dimensions[k] = (dimensions[k] || 0) + v;
-      dimensions.algebraicComplexity += W.systemLink * (ast.eqs.length - 1) * (ast.eqs.length - 1);
+      dimensions.algebraicComplexity += W.systemLink * ast.eqs.length * (ast.eqs.length - 1) / 2;   // one elimination per pair of equations
       const sum = f => parts.reduce((a, p) => a + p.stats[f], 0);
       return {
         total: Object.values(dimensions).reduce((a, v) => a + v, 0), dimensions,
@@ -2181,14 +2181,14 @@ Domains.register({
 });
 
 /**
- * Systems of 2 to 4 linear equations in x, y, z, w with a unique integer solution. Backward: pick the
+ * Systems of 2 to 6 linear equations in x, y, z, w, u, v with a unique integer solution. Backward: pick the
  * solution first, then a coefficient matrix with a non-zero determinant, then each right-hand side is
  * the row · solution. The first coefficient of every equation is kept positive (rows are negated).
  */
-const SYSTEM_VARS = ['x', 'y', 'z', 'w'];
+const SYSTEM_VARS = ['x', 'y', 'z', 'w', 'u', 'v'];
 Domains.register({
   name: 'system', label: 'System of linear equations', prompt: 'Solve the system',
-  answerHint: 'Enter the integer values of x, y, z, w in that order, separated by commas.',
+  answerHint: 'Enter the integer values of x, y, z, w, u, v (as many as there are) in that order, separated by commas.',
   weight(T, c, cfg) {
     const ops = enabledOperators(cfg);
     if (!['add', 'sub', 'mul'].every(o => ops.includes(o))) return 0;
@@ -2196,11 +2196,12 @@ Domains.register({
   },
   generate(ctx) {
     const { rng, constraints: c, config, budget, exprGen, scorer } = ctx;
-    const n = budget >= 70 && rng.chance(Math.min(0.75, (budget - 60) / 60)) ? 4
+    const n = budget >= 105 && rng.chance(0.7) ? 6 : budget >= 85 && rng.chance(0.6) ? 5
+      : budget >= 70 && rng.chance(Math.min(0.75, (budget - 60) / 60)) ? 4
       : budget >= 30 && rng.chance(Math.min(0.75, (budget - 28) / 50)) ? 3 : 2;
     const R = Math.min(c.maxRoot, 3 + Math.floor(budget / 8));
-    const M = clamp(1 + Math.floor(budget / (n === 4 ? 16 : n === 3 ? 12 : 7)), 2, Math.min(c.maxCoef, 12));
-    const zeroP = n === 2 ? 0.1 : budget >= 70 ? 0.12 : 0.3;
+    const M = clamp(1 + Math.floor(budget / (n >= 5 ? 30 : n === 4 ? 16 : n === 3 ? 12 : 7)), 2, Math.min(c.maxCoef, n >= 5 ? 5 : 12));
+    const zeroP = n === 2 ? 0.1 : n >= 5 ? 0.45 : budget >= 70 ? 0.12 : 0.3;
     const sol = Array.from({ length: n }, () => rng.int(-R, R));
     if (sol.every(v => v === 0)) sol[rng.int(0, n - 1)] = rng.int(1, R);
     let A = null;
@@ -2775,7 +2776,7 @@ ProblemValidator.register('system', (problem, ev) => {
   eqs.forEach((eq, i) => {   // coefficients by evaluation; two extra probes confirm each equation is really linear
     const c0 = at(eq, zero);
     const row = zero.map((_, j) => at(eq, zero.map((_, k) => (k === j ? 1n : 0n))) - c0);
-    for (const probe of [[2n, 3n, 5n, 7n], [-4n, 1n, 7n, -2n]]) {
+    for (const probe of [[2n, 3n, 5n, 7n, -3n, 4n], [-4n, 1n, 7n, -2n, 6n, -5n]]) {
       const v = probe.slice(0, n);
       if (at(eq, v) !== c0 + row.reduce((s, a, j) => s + a * v[j], 0n)) errors.push(`equation ${i + 1} is not linear`);
     }
@@ -3049,7 +3050,7 @@ function tupleText(answer) {
   return answer.values.map((v, i) => `${SYSTEM_VARS[i]} = ${v}`).join(', ');
 }
 function parseIntegerList(input) {
-  const cleaned = String(input).replace(/[−–]/g, '-').replace(/\b[xyz]\s*=/gi, ' ').trim();
+  const cleaned = String(input).replace(/[−–]/g, '-').replace(/\b[xyzwuv]\s*=/gi, ' ').trim();
   if (!cleaned) return { error: 'empty' };
   const values = [];
   for (const t of cleaned.split(/[\s,;]+/).filter(Boolean)) {
@@ -3450,7 +3451,7 @@ const I18N = {
       derivative: { label: 'Derivative', prompt: 'Evaluate the derivative', hint: 'Enter a single integer.' },
       integral: { label: 'Definite integral', prompt: 'Evaluate the definite integral', hint: 'Enter a single integer.' },
       exponential: { label: 'Exponential equation', prompt: 'Solve for x', hint: 'Enter the integer value of x.' },
-      system: { label: 'System of equations', prompt: 'Solve the system', hint: 'Enter x, y, z, w (as many as the system has) in order, separated by commas, e.g. 2, -3' }
+      system: { label: 'System of equations', prompt: 'Solve the system', hint: 'Enter x, y, z, w, u, v (as many as the system has) in order, separated by commas, e.g. 2, -3' }
     },
     rankNames: RANK_NAMES,
     tierNames: RANK_TIERS.map(t => t.name)
@@ -3502,7 +3503,7 @@ const I18N = {
       derivative: { label: 'Derivada', prompt: 'Calcule a derivada', hint: 'Digite um único número inteiro.' },
       integral: { label: 'Integral definida', prompt: 'Calcule a integral definida', hint: 'Digite um único número inteiro.' },
       exponential: { label: 'Equação exponencial', prompt: 'Determine o valor de x', hint: 'Digite o valor inteiro de x.' },
-      system: { label: 'Sistema de equações', prompt: 'Resolva o sistema', hint: 'Digite x, y, z, w (quantas o sistema tiver) em ordem, separados por vírgula, ex.: 2, -3' }
+      system: { label: 'Sistema de equações', prompt: 'Resolva o sistema', hint: 'Digite x, y, z, w, u, v (quantas o sistema tiver) em ordem, separados por vírgula, ex.: 2, -3' }
     },
     rankNames: [
       'Novato', 'Acólito', 'Discípulo', 'Iniciado', 'Adepto', 'Ascendente',
